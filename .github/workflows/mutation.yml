@@ -1,0 +1,33 @@
+name: mutation
+
+# Report-only mutation testing. Surviving mutants (code changes no test noticed)
+# are listed in the job log and uploaded as an artifact; they never fail the run.
+# It takes too long for every push, so it runs nightly and on demand.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Mutation testing
+        run: bash tools/mutation.sh
+
+      - name: Upload survivors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: |
+            mutants/mutmut-cicd-stats.json
+            mutants/survivors.txt
+          if-no-files-found: warn

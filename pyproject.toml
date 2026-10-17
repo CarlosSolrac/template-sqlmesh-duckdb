@@ -1,0 +1,168 @@
+##
+## Baseline tooling configuration for a new Python project.
+## Use the repository's existing configuration when one is already present.
+##
+
+[project]
+name = "project"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb==1.5.6",
+    "sqlmesh==0.236.2",
+]
+
+[dependency-groups]
+dev = [
+    "complexipy>=8,<9",           # cognitive complexity cap, see [tool.complexipy]
+    "deptry>=0.25,<0.26",         # unused, missing, and transitive dependencies
+    "diff-cover>=10,<11",        # CI: 100% coverage of changed lines
+    "mutmut>=3.8,<4; sys_platform != 'win32'",  # needs os.fork; on Windows run it through WSL
+    "mypy>=2.4,<3",
+    "pip-audit>=2.10,<3",         # CI: dependencies with known vulnerabilities
+    "pre-commit>=4,<5",
+    "pyright>=1.1.400,<2",       # PyPI wrapper; downloads a Node runtime on first run
+    "pytest>=9.0.3,<10",         # 9.0.3 fixes PYSEC-2026-1845
+    "pytest-cov>=6,<8",
+    "ruff>=0.16.10,<0.17",       # pinned: minor releases change which rules fire
+]
+
+[tool.ruff]
+target-version = "py313"
+# Without this, notebooks are silently exempt from every rule below.
+extend-include = ["*.ipynb"]
+line-length = 220
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9", "F",   # pycodestyle subset + pyflakes
+    "I",                      # import sorting
+    "B",                      # bugbear
+    "UP",                     # pyupgrade
+    "SIM",                    # simplify
+    "RUF",                    # ruff-specific
+    "D",                      # pydocstyle
+    "ANN",                    # missing annotations
+    "PTH",                    # pathlib over os.path
+    "S",                      # bandit security checks
+    "RET",                    # return-statement hygiene
+    "C4",                     # comprehension quality
+    "LOG", "G",               # logging correctness and format style
+    "TID",                    # tidy imports
+    "N",                      # pep8-naming
+    "A",                      # builtin shadowing
+    "ARG",                    # unused arguments
+    "DTZ",                    # timezone-aware datetimes
+    "ERA",                    # commented-out code
+    "T20",                    # stray print
+    "SLF",                    # private member access
+    "PGH",                    # blanket noqa / bare type-ignore
+    "PT",                     # pytest style
+    "ASYNC",                  # async correctness
+    "INP",                    # implicit namespace packages
+    "C90",                    # cyclomatic complexity, capped in [tool.ruff.lint.mccabe]
+    "PLR",                    # refactor: too many branches, arguments, returns; magic values
+    "BLE",                    # blind except
+    "TRY",                    # exception-handling anti-patterns
+    "FBT",                    # boolean positional-argument traps
+    "PERF",                   # performance anti-patterns
+    "PIE",                    # unnecessary code
+    "FURB",                   # modernization
+    "RSE",                    # raise hygiene
+    "EM",                     # exception messages bound before the raise
+]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+# pytest's assert-based style and test-only fixtures trip the bandit rules.
+# pytest's assert-based style trips bandit; test names carry the meaning that
+# a mandatory docstring would only restate, so docstrings in tests are optional.
+# Literal expected values are the specification in a test, so magic numbers
+# (PLR2004) are allowed there.
+"tests/**/*.py" = ["S101", "S105", "S106", "D100", "D103", "INP001", "PLR2004"]
+# A file named test_*.py is a test file wherever it sits. Without these two
+# patterns the ignores above never match a test written beside its module.
+"test_*.py" = ["S101", "S105", "S106", "D100", "D103", "INP001", "PLR2004"]
+"**/test_*.py" = ["S101", "S105", "S106", "D100", "D103", "INP001", "PLR2004"]
+"conftest.py" = ["S101", "D100", "INP001"]
+# AST and metaprogramming code cannot satisfy strict unknown-type reporting.
+# A CLI tool prints by design; that is the intentional-output carve-out.
+"tools/**/*.py" = ["INP001", "T201"]
+
+[tool.ruff.lint.pydocstyle]
+# This already disables the conflicting D rules; do not add redundant D2xx ignores.
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"
+reportMissingTypeStubs = true
+reportUnknownMemberType = true
+# A suppression that no longer suppresses anything is noise that hides the next real one.
+reportUnnecessaryTypeIgnoreComment = "error"
+stubPath = "stubs"
+
+[[tool.pyright.executionEnvironments]]
+# AST walking and other metaprogramming cannot satisfy strict unknown-type
+# reporting without scattering ignores. Relax deliberately, in one place.
+root = "tools"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+# Mutation runs skip these: they run code in a child process, where mutants
+# cannot be switched on, or compare source bytes that mutmut rewrites.
+markers = ["no_mutation: needs the unmutated source or a child process; skipped by mutmut"]
+# An xfail that starts passing, or a warning nobody reads, is a test that stopped testing.
+xfail_strict = true
+filterwarnings = ["error"]
+testpaths = ["tests"]
+# No build system, so the project is never installed; tests import it from the root.
+pythonpath = ["."]
+
+[tool.mutmut]
+# Mutation testing (tools/mutation.sh): a surviving mutant is a code change no
+# test noticed. Required before the first run: list the code to mutate, e.g.
+#   source_paths = ["mypackage"]
+# mutmut's own guess uses the checkout folder's name, which breaks in clones and CI.
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = ["-m", "not no_mutation"]
+
+[tool.complexipy]
+# Cognitive complexity per function; Ruff's C90 caps cyclomatic complexity at 10.
+max-complexity-allowed = 15
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+# Whole-project floor. A project adopting this with untested legacy code starts
+# at its current coverage and only raises it; CI's diff-cover step holds changed
+# lines at 100% either way.
+fail_under = 100
+show_missing = true

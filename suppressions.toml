@@ -1,0 +1,14 @@
+# Suppressions the user has approved. tools/check_suppressions.py fails on any
+# suppression comment a change adds that is not listed here by file and code.
+# The Claude Code guard hook asks the user before this file changes, so a new
+# entry is approved at the moment it is written. Every entry needs a reason.
+
+[[suppression]]
+path = "tools/hooks/stop_gate.py"
+code = "S603"
+reason = "subprocess argv comes from the hook's fixed gate list, never a shell"
+
+[[suppression]]
+path = "tools/check_declarations.py"
+code = "arg-type"
+reason = "the async visitors reuse the sync ones; async nodes carry the same fields"

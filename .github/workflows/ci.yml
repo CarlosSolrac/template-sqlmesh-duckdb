@@ -1,0 +1,57 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # diff-cover compares against the base branch
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Applications commit uv.lock and must install from it exactly.
+      # Libraries do not commit one, so they resolve at install time.
+      # This is a property of the repository, declared here once — never
+      # detected at runtime, because a workflow that drops --locked when the
+      # lockfile is missing fails open the moment someone deletes it.
+      - name: Sync the environment (application; commits uv.lock)
+        run: uv sync --locked --all-groups
+      # For a library, replace the step above with:
+      #   run: uv sync --all-groups
+
+      # Ruff, formatting, the declaration checker, and both type checkers.
+      # Runs over every file so a Ruff upgrade that changes which rules fire
+      # is caught here rather than in someone's next diff.
+      - name: Lint, format, declarations, types
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      # fail_under in pyproject.toml is the floor for the whole project; the
+      # standard is 100% of the lines a change touches, which diff-cover
+      # enforces, so untested legacy code does not block a covered change.
+      - name: Tests and coverage
+        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml --cov-branch
+
+      # A module no test imports never reaches coverage.xml, and diff-cover
+      # silently skips files without a record, so it would pass untested code.
+      - name: Every changed module has a coverage record
+        run: uv run python -m tools.check_coverage_records --base origin/${{ github.base_ref || 'main' }}
+
+      - name: Coverage of changed lines
+        run: uv run diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref || 'main' }} --fail-under=100
+
+      # In CI the tree is HEAD, so pre-commit's suppression check sees no added
+      # lines; this compares the branch against its merge base instead.
+      - name: No unapproved suppressions on this branch
+        run: uv run python -m tools.check_suppressions --base origin/${{ github.base_ref || 'main' }}
+
+      - name: Dependencies with known vulnerabilities
+        run: uv run pip-audit

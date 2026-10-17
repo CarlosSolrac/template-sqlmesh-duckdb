@@ -1,0 +1,54 @@
+# Baseline hooks. `uv run pre-commit run --files <changed files>` is the whole
+# verification loop except execution and coverage, which stay manual because
+# they need the narrowest practical entry point chosen per change.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: check-declarations
+        name: every variable annotated before first binding
+        entry: uv run python tools/check_declarations.py
+        language: system
+        types: [python]
+      - id: pyright
+        name: pyright (strict)
+        entry: uv run pyright
+        language: system
+        types: [python]
+        pass_filenames: true
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: true
+        # Parallel batches share .mypy_cache and crash mypy on a cold cache.
+        require_serial: true
+      - id: check-suppressions
+        name: no unapproved suppressions on added lines
+        entry: uv run python -m tools.check_suppressions
+        language: system
+        # pre-commit tags notebooks "jupyter", not "python"; the check reads both.
+        types_or: [python, jupyter]
+      - id: complexipy
+        name: cognitive complexity (complexipy)
+        entry: uv run complexipy
+        language: system
+        types: [python]
+      - id: deptry
+        name: imports match declared dependencies (deptry)
+        entry: uv run deptry .
+        language: system
+        # Whole-project check: an import or a pyproject.toml edit can break it.
+        files: (\.py|pyproject\.toml)$
+        pass_filenames: false
+  # Scans staged content only, so it guards commits; pre-commit installs Go itself.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
