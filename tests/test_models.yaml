@@ -1,0 +1,11 @@
+test_stg_orders_keeps_latest_version:
+  model: orders.stg_orders
+  inputs:
+    raw.orders:
+      rows:
+        - {order_id: 1, customer_id: 7, amount: 10.00, ordered_at: "2026-10-01 10:00:00+00"}
+        - {order_id: 1, customer_id: 7, amount: 12.50, ordered_at: "2026-10-01 11:00:00+00"}
+  outputs:
+    query:
+      rows:
+        - {order_id: 1, customer_id: 7, amount: 12.50, ordered_at_utc: "2026-10-01 11:00:00"}
