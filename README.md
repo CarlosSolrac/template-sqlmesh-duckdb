@@ -40,11 +40,15 @@ everything downstream of the raw table, so a same-day rerun picks up new rows
 It runs with the repository as its working directory, so it works from any directory inside it; it creates `data/` if missing. `data/`
 (input and warehouse) is git-ignored.
 
-When a run exits 1, this shows which audit or test failed (run `sqlmesh` commands from the repository root):
+When a run exits 1, its own output does not name the failing audit or test. These do (run `sqlmesh` commands from the repository root):
 
 ```sh
-uv run sqlmesh plan --restate-model raw.orders --auto-apply --no-prompts
+uv run sqlmesh test                                                       # model tests only, on their own fixture rows
+uv run sqlmesh plan --restate-model raw.orders --auto-apply --no-prompts  # tests and audits
 ```
+
+The second reruns the plan on the raw table the failed run loaded, so it writes to the warehouse as the run does. It needs SQLMesh's
+`prod` environment, which the first successful run creates; until then, use `uv run sqlmesh plan --auto-apply --no-prompts`.
 
 A failed staging audit leaves the mart at its last good rows; what each failure leaves behind is in the
 [error flow](docs/design.md#14-error-flow) and [findings](docs/design.md#12-findings). An ingestion error (missing file, undeclared
