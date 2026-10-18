@@ -259,8 +259,9 @@ Only requirements a check verifies.
 
 Allowed exceptions and rules that do not apply:
 
-- Rule 5: after a staging audit fails, `orders.stg_orders` keeps the failing rows (`src/project/main.py:77-78`); the rule allows it because
-  consumers read marts only (open question 2).
+- Rule 5: after a staging audit fails, `orders.stg_orders` keeps the failing rows (`src/project/main.py:77-78`), and anyone who can open
+  the warehouse can query them. The rule allows this only if consumers read marts only, which is *inferred*: nothing in the repository
+  enforces it (open question 2).
 - Rule 8: `CsvSource` interpolates identifiers into DDL (`src/project/adapters/csv_source.py:46-47`) only after checking the name
   against `external_models.yaml` and the `<schema>.<table>` pattern (`src/project/adapters/csv_source.py:13`,
   `src/project/adapters/csv_source.py:37-38`); tested at `tests/test_adapters.py:69-96`.
