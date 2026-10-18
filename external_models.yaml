@@ -1,0 +1,6 @@
+- name: raw.orders
+  columns:
+    order_id: INTEGER
+    customer_id: INTEGER
+    amount: DECIMAL(12, 2)
+    ordered_at: TIMESTAMPTZ
