@@ -4,7 +4,7 @@ Mode: **Document**, size **Standard**, derived from the code at `a8a9a5b` on 202
 marked *inferred* (in diagrams: a label ending in ` ?` with a dashed border) were deduced from the code; confirm or correct them.
 `path:line` references are relative to the repository root. Decisions cited as Dn are recorded in the bodies of
 [PR #1](https://github.com/CarlosSolrac/template-sqlmesh-duckdb/pull/1) (D2) and
-[PR #2](https://github.com/CarlosSolrac/template-sqlmesh-duckdb/pull/2) (D4–D13).
+[PR #2](https://github.com/CarlosSolrac/template-sqlmesh-duckdb/pull/2) (D4–D16).
 
 This repository is the reference skeleton of a SQLMesh + DuckDB batch pipeline: a CSV of orders is landed as a typed raw table, two
 SQL models turn it into daily revenue, and one composition root runs both steps.
