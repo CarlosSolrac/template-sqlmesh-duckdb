@@ -12,3 +12,6 @@ dist/
 build/
 *.egg-info/
 mutants/
+data/
+.cache/
+logs/
