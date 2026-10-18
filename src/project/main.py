@@ -1,14 +1,35 @@
 """Composition root: the only place concrete adapters are chosen and the pipeline is run."""
 
+import contextlib
 import logging
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 import duckdb
+from sqlmesh import Context
 from sqlmesh.utils.errors import PlanError
 
+from .adapters.csv_source import CsvSource
 from .ports import Planner, RawSource
 
 logger: logging.Logger = logging.getLogger(__name__)
+PROJECT_DIR: Path = Path(__file__).resolve().parents[2]
+
+
+def main(project_dir: Path = PROJECT_DIR) -> int:
+    """Wire the adapters and run the pipeline on the SQLMesh project in `project_dir`; return the exit status.
+
+    The run happens with `project_dir` as the working directory, because SQLMesh resolves `config.yaml`'s relative warehouse path
+    against it, and ingestion must write to the same file. A relative `project_dir` is resolved against the caller's working directory.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    root: Path = project_dir.resolve()
+    with contextlib.chdir(root):
+        data_dir: Path = root / "data"
+        data_dir.mkdir(exist_ok=True)
+        warehouse: Path = data_dir / "warehouse.duckdb"
+        sources: list[RawSource] = [CsvSource(table_name="raw.orders", path=data_dir / "orders.csv", contract=root / "external_models.yaml")]
+        return run(sources, lambda: duckdb.connect(warehouse), lambda: Context(paths=str(root)))
 
 
 def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConnection], open_planner: Callable[[], Planner]) -> int:
