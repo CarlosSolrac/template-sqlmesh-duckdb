@@ -63,6 +63,16 @@ def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project
     assert mart_rows(project) == SAMPLE_MART
 
 
+def test_a_same_day_rerun_picks_up_new_rows(project: Path) -> None:
+    assert main(project) == 0
+    add_orders(project, "4,9,3.00,2026-10-02 12:00:00+00\n")
+
+    status: int = main(project)
+
+    assert status == 0
+    assert mart_rows(project) == [(date(2026, 10, 1), 2, Decimal("20.00")), (date(2026, 10, 2), 2, Decimal("8.00"))]
+
+
 def test_a_project_dir_relative_to_the_working_directory_runs_that_project(project: Path) -> None:
     status: int = main(Path(project.name))
 
