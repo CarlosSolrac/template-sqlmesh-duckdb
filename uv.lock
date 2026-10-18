@@ -1417,9 +1417,10 @@ wheels = [
 [[package]]
 name = "project"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "ruamel-yaml" },
     { name = "sqlmesh" },
 ]
 
@@ -1441,6 +1442,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = "==1.5.6" },
+    { name = "ruamel-yaml", specifier = "==0.19.1" },
     { name = "sqlmesh", specifier = "==0.236.2" },
 ]
 
