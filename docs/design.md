@@ -70,8 +70,9 @@ stateDiagram-v2
     Aggregated --> [*]
 ```
 
-A blocked run leaves the failing rows in `orders.stg_orders` and the mart at its last good rows (section 12, allowed exceptions). An
-order with a NULL `amount` reaches *Aggregated* without failing any audit (finding 1).
+A run blocked by a staging audit leaves the failing rows in `orders.stg_orders` and the mart at its last good rows (section 12, allowed
+exceptions); a run blocked by a mart audit leaves them in the mart (finding 2). An order with a NULL `amount` reaches *Aggregated*
+without failing any audit (finding 1).
 
 ## 5. Components
 
@@ -131,7 +132,7 @@ flowchart LR
 
 | boundary | input | output | grain/key | invariants | owner | source |
 |---|---|---|---|---|---|---|
-| Command line | `uv run project` | exit status | one run | 0 when both plans applied; 1 on `PlanError` (a failing audit or model test), marts at their last good rows; an ingestion error ends the run with a traceback (finding 3) | `main` | `pyproject.toml:16-17`, `src/project/main.py:19-58` |
+| Command line | `uv run project` | exit status | one run | 0 when both plans applied; 1 on `PlanError` (a failing audit or model test), the mart at its last good rows unless its own audit failed (finding 2); an ingestion error ends the run with a traceback (finding 4) | `main` | `pyproject.toml:16-17`, `src/project/main.py:19-58` |
 | Ingestion | `data/orders.csv` with a header row | `raw.orders`: `order_id INTEGER`, `customer_id INTEGER`, `amount DECIMAL(12, 2)`, `ordered_at TIMESTAMPTZ` | one row per CSV row; raw rows before deduplication, no key | table declared in `external_models.yaml` as `<schema>.<table>` of plain identifiers; no undeclared column (D8); declared columns present with their types; replaced, never appended, in one transaction, so a failed load keeps the previous rows | `CsvSource` | `src/project/adapters/csv_source.py:37-52`, `src/project/adapters/csv_source.py:68-96`, `external_models.yaml:1-6` |
 | `RawSource` port | `duckdb.DuckDBPyConnection` | the raw table replaced; its row count as `int` | one call per raw table | `table_name` is read-only (`@property`); the table's schema matches `external_models.yaml` | composition root | `src/project/ports.py:9-19` |
 | `Planner` port | `restate_models: Iterable[str] \| None`, `no_prompts`, `auto_apply` | the plan applied to prod, or `PlanError` | one plan per call | model tests run before planning; a failing audit raises `PlanError` and skips downstream models; `close()` releases the warehouse file | composition root (`sqlmesh.Context` satisfies it, D4) | `src/project/ports.py:22-35`, `src/project/main.py:73-85` |
@@ -194,7 +195,7 @@ model's `FROM` changes, in the same commit.
 | [ADR-0001](adr/ADR-0001-sqlmesh-with-exit-path.md) | SQLMesh for the transformations, pinned to `sqlmesh==0.236.2`; models stay plain DuckDB SQL (no Jinja; macros only `@this_model` in audits and the incremental time-range macros), which is the exit path to another runner |
 | [ADR-0002](adr/ADR-0002-replace-and-restate.md) | adapters replace raw tables; the composition root applies model changes with `plan()`, then restates everything downstream of the raw tables, so same-day reruns pick up new rows; revisit for incremental loads |
 
-Decisions taken while building the skeleton, recorded only in pull request bodies (finding 4):
+Decisions taken while building the skeleton, recorded only in pull request bodies (finding 5):
 
 | record | what it covers |
 |---|---|
@@ -212,7 +213,7 @@ Only requirements a check verifies.
 
 | ID | Requirement | Target | Verified by |
 |----|-------------|--------|-------------|
-| NFR-01 | Rows that fail a blocking audit never reach the mart (a NULL amount fails none, finding 1) | a blocking audit makes the run exit 1; `orders.fct_daily_revenue` keeps its last good rows | `tests/test_pipeline.py:59-66` |
+| NFR-01 | Rows that fail a staging audit never reach the mart (a NULL amount fails none, finding 1) | a failing staging audit makes the run exit 1; `orders.fct_daily_revenue` keeps its last good rows | `tests/test_pipeline.py:59-66` |
 | NFR-02 | Same-day reruns process new data | a new row on an already-computed day appears in the mart | `tests/test_pipeline.py:69-76` |
 | NFR-03 | A run from an empty warehouse completes | exit 0; mart equals the sample's daily totals | `tests/test_pipeline.py:50-56` |
 | NFR-04 | The run does not depend on the caller's working directory | a run started outside the project, or with a relative project path, uses the project's warehouse | `tests/test_pipeline.py:34`, `tests/test_pipeline.py:79-83` |
@@ -230,19 +231,27 @@ Only requirements a check verifies.
    adds nothing to `revenue` (`models/marts/fct_daily_revenue.sql:13-14`), silently, unless every order that day lacks an amount, which
    makes `revenue` NULL and fails the mart's `not_null`. Fix: add `amount` to `stg_orders`' `not_null` columns, here and in design-spec's
    draft. (Known: D2, PR #1.)
-2. **Rule 5, tied versions deduplicate arbitrarily (known).** `models/staging/stg_orders.sql:18` orders versions by `ordered_at` only,
+2. **Rule 5, a failing mart audit leaves its failing rows in the mart (new).** Restating a `FULL` model rebuilds its prod table in
+   place, so when an audit of `orders.fct_daily_revenue` (`models/marts/fct_daily_revenue.sql:5-8`) fails, the mart already holds the
+   failing rows, while the run logs that the marts keep their last good rows (`src/project/main.py:56`; also the docstring at
+   `src/project/main.py:47`). Reproduced on 2026-10-18 with SQLMesh 0.236.2: after a good run, a day whose only order has no amount
+   makes the run exit 1 and leaves `(2026-10-03, 1, NULL)` in the mart. Consequence: consumers, who read marts only, see a row a
+   blocking audit rejected, and the log tells the operator otherwise. Fix: enforce every mart invariant upstream in staging, so a mart
+   audit can fail only on a model bug (finding 1's fix closes the case found); make the message say which table keeps the failing
+   rows; add an end-to-end test of a failing mart audit.
+3. **Rule 5, tied versions deduplicate arbitrarily (known).** `models/staging/stg_orders.sql:18` orders versions by `ordered_at` only,
    so two versions of an order with the same `ordered_at` and different amounts keep whichever row comes first. Consequence: revenue
    can depend on input row order. Fix: a tie-breaking key, or an audit that rejects tied versions; first in design-spec's draft. (Known:
    task 1's adversarial review, PR #1.)
-3. **Rule 5, ingestion failures are not caught once per unit of work (new).** `run()` catches only `PlanError`
+4. **Rule 5, ingestion failures are not caught once per unit of work (new).** `run()` catches only `PlanError`
    (`src/project/main.py:52-57`); `CsvSource.load` raises `ValueError` or `duckdb.Error` (`src/project/adapters/csv_source.py:32-35`),
    which propagate (`tests/test_main.py:110-119`). Consequence: an undeclared column or a malformed CSV ends `uv run project` with a
    traceback rather than one logged line, and failures come in two families, not one. Fix: a project exception (for example
    `IngestionError`) that adapters raise and `run()` logs before returning 1.
-4. **Rule 12, decisions without records (new).** D4, D5, D8 and D9 (section 10) shape the code but live only in PR #2's body, not in
+5. **Rule 12, decisions without records (new).** D4, D5, D8 and D9 (section 10) shape the code but live only in PR #2's body, not in
    `docs/adr/`. Consequence: a reader of the repository alone cannot see why, and could undo D9's `contextlib.chdir`
    (`src/project/main.py:29`) and bring back the two-warehouses bug it fixes. Fix: an ADR for each decision kept after review.
-5. **Rule 11, a model change does not require a test change (new).** Each model has a unit test that checks every output column
+6. **Rule 11, a model change does not require a test change (new).** Each model has a unit test that checks every output column
    (`tests/test_models.yaml:1-25`), but no check fails a change under `models/` that leaves `tests/test_models.yaml` untouched. The
    staging test also uses only `+00` timestamps (`tests/test_models.yaml:6-7`), so the UTC conversion (`models/staging/stg_orders.sql:16`)
    is never exercised with another offset. Consequence: a model edit can ship with a stale test that still passes. Fix: a CI step that
@@ -250,7 +259,7 @@ Only requirements a check verifies.
 
 Allowed exceptions and rules that do not apply:
 
-- Rule 5: after a blocking audit, `orders.stg_orders` keeps the failing rows (`src/project/main.py:77-78`); the rule allows it because
+- Rule 5: after a staging audit fails, `orders.stg_orders` keeps the failing rows (`src/project/main.py:77-78`); the rule allows it because
   consumers read marts only (open question 2).
 - Rule 8: `CsvSource` interpolates identifiers into DDL (`src/project/adapters/csv_source.py:46-47`) only after checking the name
   against `external_models.yaml` and the `<schema>.<table>` pattern (`src/project/adapters/csv_source.py:13`,
@@ -291,8 +300,10 @@ sequenceDiagram
         Note over SQLMesh: model tests run before each plan
         alt a model test fails
             SQLMesh-->>Run: PlanError before anything is applied, both models keep their rows
-        else a blocking audit fails
+        else a staging audit fails
             SQLMesh-->>Run: PlanError, stg_orders keeps the failing rows, the mart keeps its last good rows
+        else a mart audit fails
+            SQLMesh-->>Run: PlanError, the mart keeps the failing rows (finding 2)
         else every test and audit passes
             SQLMesh->>DB: rebuild orders.stg_orders and orders.fct_daily_revenue
         end
@@ -309,6 +320,6 @@ Not applicable: document mode describes the code as it is; the change-impact dia
 
 1. What are the production row volume, growth rate and refresh frequency? They decide between `FULL` models with replaced raw tables
    (ADR-0002) and incremental ones.
-2. Who reads the warehouse, and can they be held to marts only? After a blocked run, `orders.stg_orders` holds the failing rows, and
-   nothing in the repository restricts access to it.
-3. Should findings 1 and 2 be fixed here first, or in design-spec's draft, which this template follows on behaviour (D2)?
+2. Who reads the warehouse, and can they be held to marts only? After a blocked run, `orders.stg_orders` (or, finding 2, the mart)
+   holds the failing rows, and nothing in the repository restricts access to it.
+3. Should findings 1 and 3 be fixed here first, or in design-spec's draft, which this template follows on behaviour (D2)?
