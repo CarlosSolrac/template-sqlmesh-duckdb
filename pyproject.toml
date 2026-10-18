@@ -148,7 +148,13 @@ addopts = "--strict-config --strict-markers"
 markers = ["no_mutation: needs the unmutated source or a child process; skipped by mutmut"]
 # An xfail that starts passing, or a warning nobody reads, is a test that stopped testing.
 xfail_strict = true
-filterwarnings = ["error"]
+# Two deprecation warnings SQLMesh 0.236.2 raises on import, from its dependencies
+# (pydantic's json_encoders, dateparser on Python 3.13); approved 2026-10-17.
+filterwarnings = [
+    "error",
+    "ignore:`json_encoders` is deprecated:pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore:Parsing dates involving a day of month without a year specified:DeprecationWarning",
+]
 testpaths = ["tests"]
 # uv sync installs the project package (editable, from src/); the root stays on
 # the path so tests can import the vendored tools.
