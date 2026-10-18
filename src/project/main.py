@@ -21,8 +21,10 @@ def main(project_dir: Path = PROJECT_DIR) -> int:
 
     The run happens with `project_dir` as the working directory, because SQLMesh resolves `config.yaml`'s relative warehouse path
     against it, and ingestion must write to the same file. A relative `project_dir` is resolved against the caller's working directory.
+    Only this module logs at INFO; the root logger stays at WARNING, so SQLMesh does not log every statement it runs.
     """
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
+    logger.setLevel(logging.INFO)
     root: Path = project_dir.resolve()
     with contextlib.chdir(root):
         data_dir: Path = root / "data"

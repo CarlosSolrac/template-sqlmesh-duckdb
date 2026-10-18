@@ -1,5 +1,6 @@
 """End-to-end runs of the composition root against a copy of the SQLMesh project in a temporary directory."""
 
+import logging
 import shutil
 from datetime import date
 from decimal import Decimal
@@ -46,11 +47,13 @@ def mart_rows(project: Path) -> list[tuple[date, int, Decimal]]:
         return con.execute(MART_QUERY).fetchall()
 
 
-def test_a_full_run_from_an_empty_warehouse_exits_0_and_fills_the_mart(project: Path) -> None:
+def test_a_full_run_from_an_empty_warehouse_exits_0_and_fills_the_mart(project: Path, caplog: pytest.LogCaptureFixture) -> None:
     status: int = main(project)
 
     assert status == 0
     assert mart_rows(project) == SAMPLE_MART
+    assert "raw.orders: 4 rows" in caplog.messages
+    assert logging.getLogger().getEffectiveLevel() == logging.WARNING
 
 
 def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path) -> None:
