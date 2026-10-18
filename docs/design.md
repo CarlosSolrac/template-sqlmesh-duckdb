@@ -126,3 +126,63 @@ flowchart LR
 | PositiveAudit | `audits/assert_positive_amount.sql:1-5`, attached at `models/staging/stg_orders.sql:8` |
 | ModelTests | `tests/test_models.yaml:1-25` |
 | Raw | `external_models.yaml:1-6` |
+
+## 6. Boundary contracts
+
+| boundary | input | output | grain/key | invariants | owner | source |
+|---|---|---|---|---|---|---|
+| Command line | `uv run project` | exit status | one run | 0 when both plans applied; 1 on `PlanError` (a failing audit or model test), marts at their last good rows; an ingestion error ends the run with a traceback (finding 3) | `main` | `pyproject.toml:16-17`, `src/project/main.py:19-58` |
+| Ingestion | `data/orders.csv` with a header row | `raw.orders`: `order_id INTEGER`, `customer_id INTEGER`, `amount DECIMAL(12, 2)`, `ordered_at TIMESTAMPTZ` | one row per CSV row; raw rows before deduplication, no key | table declared in `external_models.yaml` as `<schema>.<table>` of plain identifiers; no undeclared column (D8); declared columns present with their types; replaced, never appended, in one transaction, so a failed load keeps the previous rows | `CsvSource` | `src/project/adapters/csv_source.py:37-52`, `src/project/adapters/csv_source.py:68-96`, `external_models.yaml:1-6` |
+| `RawSource` port | `duckdb.DuckDBPyConnection` | the raw table replaced; its row count as `int` | one call per raw table | `table_name` is read-only (`@property`); the table's schema matches `external_models.yaml` | composition root | `src/project/ports.py:9-19` |
+| `Planner` port | `restate_models: Iterable[str] \| None`, `no_prompts`, `auto_apply` | the plan applied to prod, or `PlanError` | one plan per call | model tests run before planning; a failing audit raises `PlanError` and skips downstream models; `close()` releases the warehouse file | composition root (`sqlmesh.Context` satisfies it, D4) | `src/project/ports.py:22-35`, `src/project/main.py:73-85` |
+| Staging | `raw.orders` | `orders.stg_orders` | one row per order, keyed by `order_id` (the version with the latest `ordered_at`) | every column cast; `not_null(order_id, customer_id, ordered_at_utc)`; `unique_values(order_id)`; `assert_positive_amount` (rows with `amount <= 0` fail; NULL passes, finding 1) | `stg_orders` | `models/staging/stg_orders.sql:1-18`, `audits/assert_positive_amount.sql:1-5` |
+| Mart | `orders.stg_orders` | `orders.fct_daily_revenue` | one row per UTC day, keyed by `order_date` | every column cast; `not_null(order_date, order_count, revenue)`; `unique_values(order_date)` | `fct_daily_revenue` | `models/marts/fct_daily_revenue.sql:1-16` |
+
+No HTTP API, so no OpenAPI file.
+
+## 7. Dependency matrix
+
+Not applicable: three modules carry code (`main`, `ports`, `adapters.csv_source`; the two `__init__.py` files hold only a docstring),
+and the matrix starts above four. Import direction: `main → adapters.csv_source, ports` (`src/project/main.py:12-13`); `ports` and
+`adapters.csv_source` import no internal module (`CsvSource` satisfies `RawSource` structurally). Third-party imports (`duckdb`,
+`sqlmesh`, `ruamel.yaml`; `src/project/main.py:8-10`, `src/project/ports.py:6`, `src/project/adapters/csv_source.py:8-9`) are exactly
+the declared runtime dependencies (`pyproject.toml:10-14`), which deptry checks on every commit (`.pre-commit-config.yaml:43-49`).
+Below the matrix threshold, the direction needs no import-linter contract.
+
+## 8. Model lineage
+
+Not applicable: two models (the DAG starts above four); the component flowchart shows the lineage `raw.orders → orders.stg_orders →
+orders.fct_daily_revenue` (`models/staging/stg_orders.sql:17`, `models/marts/fct_daily_revenue.sql:15`). No Python models.
+
+SQLMesh's own view of the same lineage is [lineage.html](lineage.html) (models only; it loads its graph library from unpkg, so it needs
+network to view), generated with `uv run sqlmesh dag docs/lineage.html` (D15). It is generated output: rerun the command whenever a
+model's `FROM` changes, in the same commit.
+
+## 9. Directory tree
+
+```text
+.
+├── config.yaml                      # SQLMesh: DuckDB gateway at data/warehouse.duckdb, dialect duckdb
+├── external_models.yaml             # raw table contract: names and column types (CsvSource's allowlist)
+├── models/
+│   ├── staging/stg_orders.sql       # latest version per order, typed, UTC; audited
+│   └── marts/fct_daily_revenue.sql  # daily totals; audited
+├── audits/assert_positive_amount.sql
+├── src/project/
+│   ├── main.py                      # composition root: main(), run(), ingest(), transform()
+│   ├── ports.py                     # Protocols only: RawSource, Planner
+│   ├── adapters/csv_source.py       # CsvSource: the only SQL built in Python (identifier-only DDL)
+│   └── py.typed
+├── tests/
+│   ├── test_models.yaml             # SQLMesh unit tests, one per model
+│   ├── test_adapters.py             # CsvSource against in-memory DuckDB
+│   ├── test_main.py                 # run() with fake sources and a fake planner
+│   ├── test_pipeline.py             # end-to-end runs of main() on a copy of the project
+│   └── fixtures/orders.csv          # sample input
+├── docs/
+│   ├── design.md                    # this file
+│   ├── lineage.html                 # generated: uv run sqlmesh dag docs/lineage.html
+│   └── adr/                         # decision records (section 10)
+├── data/                            # git-ignored: orders.csv (input), warehouse.duckdb
+└── tools/                           # vendored python-code-standards checks, not part of the pipeline
+```

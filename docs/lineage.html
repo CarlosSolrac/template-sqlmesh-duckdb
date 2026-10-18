@@ -1,0 +1,19 @@
+<div>
+  <div id="sqlglot-lineage"></div>
+  <script type="text/javascript" src="https://unpkg.com/vis-data@latest/peer/umd/vis-data.min.js"></script>
+  <script type="text/javascript" src="https://unpkg.com/vis-network@latest/peer/umd/vis-network.min.js"></script>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/vis-network/styles/vis-network.min.css" />
+  <script type="text/javascript">
+    var nodes = new vis.DataSet([{"id": "\"warehouse\".\"orders\".\"fct_daily_revenue\"", "label": "\"fct_daily_revenue\"", "title": "<span>\"warehouse\".\"orders\".\"fct_daily_revenue\"</span>"}, {"id": "\"warehouse\".\"orders\".\"stg_orders\"", "label": "\"stg_orders\"", "title": "<span>\"warehouse\".\"orders\".\"stg_orders\"</span>"}, {"id": "\"warehouse\".\"raw\".\"orders\"", "label": "\"orders\"", "title": "<span>\"warehouse\".\"raw\".\"orders\"</span>"}])
+    nodes.forEach(row => row["title"] = new DOMParser().parseFromString(row["title"], "text/html").body.childNodes[0])
+
+    new vis.Network(
+        document.getElementById("sqlglot-lineage"),
+        {
+            nodes: nodes,
+            edges: new vis.DataSet([{"from": "\"warehouse\".\"orders\".\"stg_orders\"", "to": "\"warehouse\".\"orders\".\"fct_daily_revenue\""}, {"from": "\"warehouse\".\"raw\".\"orders\"", "to": "\"warehouse\".\"orders\".\"stg_orders\""}])
+        },
+        {"height": "100%", "width": "100%", "layout": {"hierarchical": {"enabled": true, "nodeSpacing": 200, "sortMethod": "directed"}}, "interaction": {}, "physics": {"enabled": false}, "edges": {"arrows": "to"}, "nodes": {"shape": "box"}},
+    )
+  </script>
+</div>
