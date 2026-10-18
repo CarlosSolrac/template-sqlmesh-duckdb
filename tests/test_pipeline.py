@@ -34,6 +34,11 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return copy
 
 
+def add_orders(project: Path, rows: str) -> None:
+    """Replace the project's input with the sample orders plus `rows`, keeping the sample's LF line endings."""
+    (project / "data" / "orders.csv").write_text(SAMPLE_CSV.read_text(encoding="utf-8") + rows, encoding="utf-8", newline="\n")
+
+
 def mart_rows(project: Path) -> list[tuple[date, int, Decimal]]:
     """Read the daily revenue mart from the project's warehouse."""
     con: duckdb.DuckDBPyConnection
@@ -45,6 +50,16 @@ def test_a_full_run_from_an_empty_warehouse_exits_0_and_fills_the_mart(project: 
     status: int = main(project)
 
     assert status == 0
+    assert mart_rows(project) == SAMPLE_MART
+
+
+def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path) -> None:
+    assert main(project) == 0
+    add_orders(project, "4,9,-3.00,2026-10-02 12:00:00+00\n")
+
+    status: int = main(project)
+
+    assert status == 1
     assert mart_rows(project) == SAMPLE_MART
 
 
