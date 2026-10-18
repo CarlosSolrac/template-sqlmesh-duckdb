@@ -9,3 +9,17 @@ test_stg_orders_keeps_latest_version:
     query:
       rows:
         - {order_id: 1, customer_id: 7, amount: 12.50, ordered_at_utc: "2026-10-01 11:00:00"}
+
+test_fct_daily_revenue_sums_by_day:
+  model: orders.fct_daily_revenue
+  inputs:
+    orders.stg_orders:
+      rows:
+        - {order_id: 1, customer_id: 7, amount: 12.50, ordered_at_utc: "2026-10-01 11:00:00"}
+        - {order_id: 2, customer_id: 8, amount: 7.50, ordered_at_utc: "2026-10-01 18:00:00"}
+        - {order_id: 3, customer_id: 7, amount: 5.00, ordered_at_utc: "2026-10-02 09:00:00"}
+  outputs:
+    query:
+      rows:
+        - {order_date: "2026-10-01", order_count: 2, revenue: 20.00}
+        - {order_date: "2026-10-02", order_count: 1, revenue: 5.00}
