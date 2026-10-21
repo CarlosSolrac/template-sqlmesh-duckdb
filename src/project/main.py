@@ -10,8 +10,7 @@ from sqlmesh import Context
 from sqlmesh.core.console import set_console
 from sqlmesh.utils.errors import PlanError
 
-from .adapters.csv_source import CsvSource
-from .adapters.errors import IngestionError
+from .adapters.csv_source import CsvSource, IngestionError
 from .diagnostics import FailureLog
 from .ports import Planner, RawSource
 

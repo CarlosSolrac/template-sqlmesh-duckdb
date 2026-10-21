@@ -18,7 +18,7 @@ class RawSource(Protocol):
         """Create or replace the raw table on the given connection and return its row count.
 
         Raises:
-            project.adapters.errors.IngestionError: the source cannot be loaded; the previous table is kept.
+            project.adapters.csv_source.IngestionError: the source cannot be loaded; the previous table is kept.
         """
         ...
 

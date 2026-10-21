@@ -5,8 +5,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from project.adapters.csv_source import CsvSource
-from project.adapters.errors import IngestionError
+from project.adapters.csv_source import CsvSource, IngestionError
 from project.ports import RawSource
 
 ROOT: Path = Path(__file__).resolve().parents[1]
