@@ -66,6 +66,16 @@ def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project
     assert mart_rows(project) == SAMPLE_MART
 
 
+def test_a_day_whose_only_order_has_no_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path) -> None:
+    assert main(project) == 0
+    add_orders(project, "4,9,,2026-10-03 12:00:00+00\n")
+
+    status: int = main(project)
+
+    assert status == 1
+    assert mart_rows(project) == SAMPLE_MART
+
+
 def test_a_same_day_rerun_picks_up_new_rows(project: Path) -> None:
     assert main(project) == 0
     add_orders(project, "4,9,3.00,2026-10-02 12:00:00+00\n")

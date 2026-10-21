@@ -71,8 +71,8 @@ stateDiagram-v2
 ```
 
 A run blocked by a staging audit leaves the failing rows in `orders.stg_orders` and the mart at its last good rows (section 12, allowed
-exceptions); a run blocked by a mart audit leaves them in the mart (finding 2). An order with a NULL `amount` reaches *Aggregated*
-without failing any audit (finding 1).
+exceptions); a run blocked by a mart audit would leave them in the mart (finding 2: staging now stops the case found, but a mart-model bug would still land there). An order with a
+NULL `amount` fails staging's `not_null` (finding 1, fixed).
 
 ## 5. Components
 
@@ -117,7 +117,7 @@ flowchart LR
 | node | source |
 |---|---|
 | Main | `src/project/main.py:19-34`: working directory `src/project/main.py:29`, creates `data/` `src/project/main.py:31`, chooses `CsvSource` `src/project/main.py:33` and `Context` `src/project/main.py:34` |
-| Run | `src/project/main.py:37-58`; `ingest` closes the connection before SQLMesh opens the file `src/project/main.py:61-70`; `transform` plans, then restates `src/project/main.py:73-85`; `PlanError` → 1 `src/project/main.py:55-57` |
+| Run | `src/project/main.py:37-60`; `ingest` closes the connection before SQLMesh opens the file `src/project/main.py:63-72`; `transform` plans, then restates `src/project/main.py:75-87`; `PlanError` → 1 `src/project/main.py:55-59` |
 | Csv | `src/project/adapters/csv_source.py:16-53`: declared tables and their column types `src/project/adapters/csv_source.py:68-83`, `<schema>.<table>` names only `src/project/adapters/csv_source.py:86-96`, undeclared columns refused `src/project/adapters/csv_source.py:40-43`, one transaction `src/project/adapters/csv_source.py:44-52` |
 | RawSource | `src/project/ports.py:9-19` |
 | Planner | `src/project/ports.py:22-35`; `sqlmesh.Context` passed where a `Planner` is expected, `src/project/main.py:34` |
@@ -132,11 +132,11 @@ flowchart LR
 
 | boundary | input | output | grain/key | invariants | owner | source |
 |---|---|---|---|---|---|---|
-| Command line | `uv run project` | exit status | one run | 0 when both plans applied; 1 on `PlanError` (a failing audit or model test), the mart at its last good rows unless its own audit failed (finding 2); an ingestion error ends the run with a traceback (finding 4) | `main` | `pyproject.toml:16-17`, `src/project/main.py:19-58` |
+| Command line | `uv run project` | exit status | one run | 0 when both plans applied; 1 on `PlanError` (a failing audit or model test), the mart at its last good rows unless its own audit failed, which no input found can now cause (finding 2); an ingestion error ends the run with a traceback (finding 4) | `main` | `pyproject.toml:16-17`, `src/project/main.py:19-60` |
 | Ingestion | `data/orders.csv` with a header row | `raw.orders`: `order_id INTEGER`, `customer_id INTEGER`, `amount DECIMAL(12, 2)`, `ordered_at TIMESTAMPTZ` | one row per CSV row; raw rows before deduplication, no key | table declared in `external_models.yaml` as `<schema>.<table>` of plain identifiers; no undeclared column (D8); declared columns present with their types; replaced, never appended, in one transaction, so a failed load keeps the previous rows | `CsvSource` | `src/project/adapters/csv_source.py:37-52`, `src/project/adapters/csv_source.py:68-96`, `external_models.yaml:1-6` |
 | `RawSource` port | `duckdb.DuckDBPyConnection` | the raw table replaced; its row count as `int` | one call per raw table | `table_name` is read-only (`@property`); the table's schema matches `external_models.yaml` | composition root | `src/project/ports.py:9-19` |
-| `Planner` port | `restate_models: Iterable[str] \| None`, `no_prompts`, `auto_apply` | the plan applied to prod, or `PlanError` | one plan per call | model tests run before planning; a failing audit raises `PlanError` and skips downstream models; `close()` releases the warehouse file | composition root (`sqlmesh.Context` satisfies it, D4) | `src/project/ports.py:22-35`, `src/project/main.py:73-85` |
-| Staging | `raw.orders` | `orders.stg_orders` | one row per order, keyed by `order_id` (the version with the latest `ordered_at`) | every column cast; `not_null(order_id, customer_id, ordered_at_utc)`; `unique_values(order_id)`; `assert_positive_amount` (rows with `amount <= 0` fail; NULL passes, finding 1) | `stg_orders` | `models/staging/stg_orders.sql:1-18`, `audits/assert_positive_amount.sql:1-5` |
+| `Planner` port | `restate_models: Iterable[str] \| None`, `no_prompts`, `auto_apply` | the plan applied to prod, or `PlanError` | one plan per call | model tests run before planning; a failing audit raises `PlanError` and skips downstream models; `close()` releases the warehouse file | composition root (`sqlmesh.Context` satisfies it, D4) | `src/project/ports.py:22-35`, `src/project/main.py:75-87` |
+| Staging | `raw.orders` | `orders.stg_orders` | one row per order, keyed by `order_id` (the version with the latest `ordered_at`) | every column cast; `not_null(order_id, customer_id, amount, ordered_at_utc)`; `unique_values(order_id)`; `assert_positive_amount` (rows with `amount <= 0` fail; a NULL `amount` fails `not_null`, finding 1, fixed) | `stg_orders` | `models/staging/stg_orders.sql:1-18`, `audits/assert_positive_amount.sql:1-5` |
 | Mart | `orders.stg_orders` | `orders.fct_daily_revenue` | one row per UTC day, keyed by `order_date` | every column cast; `not_null(order_date, order_count, revenue)`; `unique_values(order_date)` | `fct_daily_revenue` | `models/marts/fct_daily_revenue.sql:1-16` |
 
 No HTTP API, so no OpenAPI file.
@@ -213,10 +213,10 @@ Only requirements a check verifies.
 
 | ID | Requirement | Target | Verified by |
 |----|-------------|--------|-------------|
-| NFR-01 | Rows that fail a staging audit never reach the mart (a NULL amount fails none, finding 1) | a failing staging audit makes the run exit 1; `orders.fct_daily_revenue` keeps its last good rows | `tests/test_pipeline.py:59-66` |
-| NFR-02 | Same-day reruns process new data | a new row on an already-computed day appears in the mart | `tests/test_pipeline.py:69-76` |
+| NFR-01 | Rows that fail a staging audit never reach the mart (including a NULL amount, finding 1, fixed) | a failing staging audit makes the run exit 1; `orders.fct_daily_revenue` keeps its last good rows | `tests/test_pipeline.py:59-77` |
+| NFR-02 | Same-day reruns process new data | a new row on an already-computed day appears in the mart | `tests/test_pipeline.py:79-86` |
 | NFR-03 | A run from an empty warehouse completes | exit 0; mart equals the sample's daily totals | `tests/test_pipeline.py:50-56` |
-| NFR-04 | The run does not depend on the caller's working directory | a run started outside the project, or with a relative project path, uses the project's warehouse | `tests/test_pipeline.py:34`, `tests/test_pipeline.py:79-83` |
+| NFR-04 | The run does not depend on the caller's working directory | a run started outside the project, or with a relative project path, uses the project's warehouse | `tests/test_pipeline.py:34`, `tests/test_pipeline.py:89-93` |
 | NFR-05 | Only declared raw tables and columns are loaded | `ValueError` before any DDL; no schema created | `tests/test_adapters.py:58-112` |
 | NFR-06 | A failed reload keeps the previous raw table | previous rows after a missing file or a value of the wrong type | `tests/test_adapters.py:40-55` |
 | NFR-07 | Models produce the expected rows | `uv run sqlmesh test`: 2 tests pass; SQLMesh also runs them before every plan, so each end-to-end test runs them in CI | `tests/test_models.yaml:1-25`, `tests/test_pipeline.py:30-31` |
@@ -226,25 +226,27 @@ Only requirements a check verifies.
 
 ## 12. Findings
 
-1. **Rule 5, a NULL amount passes every audit (known).** `not_null` in `models/staging/stg_orders.sql:6` omits `amount`, and
+1. **Rule 5, a NULL amount passed every audit (known; fixed).** `not_null` in `models/staging/stg_orders.sql:6` omitted `amount`, and
    `amount <= 0` in `audits/assert_positive_amount.sql:5` is unknown for NULL. Consequence: such an order counts in `order_count` but
    adds nothing to `revenue` (`models/marts/fct_daily_revenue.sql:13-14`), silently, unless every order that day lacks an amount, which
    makes `revenue` NULL and fails the mart's `not_null`. Fix: add `amount` to `stg_orders`' `not_null` columns, here and in design-spec's
    draft. (Known: D2, PR #1.)
-2. **Rule 5, a failing mart audit leaves its failing rows in the mart (new).** Restating a `FULL` model rebuilds its prod table in
+2. **Rule 5, a failing mart audit leaves its failing rows in the mart (new; case found fixed).** Restating a `FULL` model rebuilds its prod table in
    place, so when an audit of `orders.fct_daily_revenue` (`models/marts/fct_daily_revenue.sql:5-8`) fails, the mart already holds the
    failing rows, while the run logs that the marts keep their last good rows (`src/project/main.py:56`; also the docstring at
    `src/project/main.py:47`). Reproduced on 2026-10-18 with SQLMesh 0.236.2: after a good run, a day whose only order has no amount
    makes the run exit 1 and leaves `(2026-10-03, 1, NULL)` in the mart. Consequence: consumers, who read marts only, see a row a
    blocking audit rejected, and the log tells the operator otherwise. Fix: enforce every mart invariant upstream in staging, so a mart
    audit can fail only on a model bug (finding 1's fix closes the case found); make the message say which table keeps the failing
-   rows; add an end-to-end test of a failing mart audit.
+   rows; add an end-to-end test of a failing mart audit. Done: `amount` is in staging's `not_null`; the message and docstring now
+   name the model that failed its audit; `tests/test_pipeline.py:69-77` is the end-to-end test of the case found. Still true: a mart
+   audit that fails because of a model bug leaves its rows in the mart, and no test reproduces that.
 3. **Rule 5, tied versions deduplicate arbitrarily (known).** `models/staging/stg_orders.sql:18` orders versions by `ordered_at` only,
    so two versions of an order with the same `ordered_at` and different amounts keep whichever row comes first. Consequence: revenue
    can depend on input row order. Fix: a tie-breaking key, or an audit that rejects tied versions; first in design-spec's draft. (Known:
    task 1's adversarial review, PR #1.)
 4. **Rule 5, ingestion failures are not caught once per unit of work (new).** `run()` catches only `PlanError`
-   (`src/project/main.py:52-57`); `CsvSource.load` raises `ValueError` or `duckdb.Error` (`src/project/adapters/csv_source.py:32-35`),
+   (`src/project/main.py:52-59`); `CsvSource.load` raises `ValueError` or `duckdb.Error` (`src/project/adapters/csv_source.py:32-35`),
    which propagate (`tests/test_main.py:110-119`). Consequence: an undeclared column or a malformed CSV ends `uv run project` with a
    traceback rather than one logged line, and failures come in two families, not one. Fix: a project exception (for example
    `IngestionError`) that adapters raise and `run()` logs before returning 1.
@@ -259,7 +261,7 @@ Only requirements a check verifies.
 
 Allowed exceptions and rules that do not apply:
 
-- Rule 5: after a staging audit fails, `orders.stg_orders` keeps the failing rows (`src/project/main.py:77-78`), and anyone who can open
+- Rule 5: after a staging audit fails, `orders.stg_orders` keeps the failing rows (`src/project/main.py:79-80`), and anyone who can open
   the warehouse can query them. The rule allows this only if consumers read marts only, which is *inferred*: nothing in the repository
   enforces it (open question 2).
 - Rule 8: `CsvSource` interpolates identifiers into DDL (`src/project/adapters/csv_source.py:46-47`) only after checking the name
@@ -278,7 +280,7 @@ Not applicable: no Python contract is under review; the two Protocols are in sec
 ## 14. Error flow
 
 The failure paths are the template's main promise (NFR-01, NFR-05, NFR-06), so they are drawn. `tests/test_main.py:77-119` drives the
-same paths with fake sources and a fake planner; `tests/test_pipeline.py:50-83` drives them end to end.
+same paths with fake sources and a fake planner; `tests/test_pipeline.py:50-93` drives them end to end.
 
 ```mermaid
 sequenceDiagram
@@ -304,7 +306,7 @@ sequenceDiagram
         else a staging audit fails
             SQLMesh-->>Run: PlanError, stg_orders keeps the failing rows, the mart keeps its last good rows
         else a mart audit fails
-            SQLMesh-->>Run: PlanError, the mart keeps the failing rows (finding 2)
+            SQLMesh-->>Run: PlanError, the mart keeps the failing rows (finding 2, no input causes it now)
         else every test and audit passes
             SQLMesh->>DB: rebuild orders.stg_orders and orders.fct_daily_revenue
         end

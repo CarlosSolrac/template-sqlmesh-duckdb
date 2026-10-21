@@ -44,7 +44,7 @@ def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConne
         open_planner: Opens SQLMesh on the warehouse.
 
     Returns:
-        0 when every plan applied; 1 when one failed (a blocking audit, for example), leaving the marts with their last good rows.
+        0 when every plan applied; 1 when one failed; after a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows, while a failed model test applies nothing.
 
     Raises:
         Exception: whatever a source raises; nothing is planned then.
@@ -53,7 +53,9 @@ def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConne
     try:
         transform([source.table_name for source in sources], open_planner)
     except PlanError:
-        logger.exception("The pipeline stopped; the marts keep their last good rows. `uv run sqlmesh plan --restate-model <raw table> --auto-apply --no-prompts` shows which audit or test failed.")
+        logger.exception(
+            "The pipeline stopped. After a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows; a failed model test applies nothing. `uv run sqlmesh test` runs the model tests; `uv run sqlmesh plan --restate-model <raw table> --auto-apply --no-prompts` shows which audit failed, writes to the warehouse, and needs one successful run first."
+        )
         return 1
     return 0
 
