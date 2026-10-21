@@ -8,6 +8,7 @@ import duckdb
 import pytest
 from sqlmesh.utils.errors import PlanError
 
+from project.adapters.errors import IngestionError
 from project.main import run
 from project.ports import Planner, RawSource
 
@@ -107,12 +108,25 @@ def test_run_returns_1_and_closes_the_planner_when_the_plan_fails(caplog: pytest
     assert any(record.levelno == logging.ERROR and record.exc_info is not None and isinstance(record.exc_info[1], PlanError) for record in caplog.records)
 
 
-def test_run_closes_the_connection_and_opens_no_planner_when_a_source_fails() -> None:
+def test_run_returns_1_and_opens_no_planner_when_a_source_cannot_ingest(caplog: pytest.LogCaptureFixture) -> None:
     journal: Journal = Journal()
     planner: FakePlanner = FakePlanner(journal)
 
-    with pytest.raises(ValueError, match="undeclared"):
-        run([FakeSource("raw.orders", 4, journal, error=ValueError("undeclared"))], lambda: connect_in_memory(journal), lambda: open_after_ingestion_closed(journal, planner))
+    status: int = run([FakeSource("raw.orders", 4, journal, error=IngestionError("undeclared"))], lambda: connect_in_memory(journal), lambda: open_after_ingestion_closed(journal, planner))
+
+    assert status == 1
+    assert journal.events == ["connect", "load raw.orders"]
+    with pytest.raises(duckdb.ConnectionException):
+        journal.connections[0].execute("SELECT 1")
+    assert any(record.levelno == logging.ERROR and record.exc_info is not None and isinstance(record.exc_info[1], IngestionError) for record in caplog.records)
+
+
+def test_run_lets_an_unexpected_source_error_propagate_and_closes_the_connection() -> None:
+    journal: Journal = Journal()
+    planner: FakePlanner = FakePlanner(journal)
+
+    with pytest.raises(RuntimeError, match="bug"):
+        run([FakeSource("raw.orders", 4, journal, error=RuntimeError("bug"))], lambda: connect_in_memory(journal), lambda: open_after_ingestion_closed(journal, planner))
 
     assert journal.events == ["connect", "load raw.orders"]
     with pytest.raises(duckdb.ConnectionException):

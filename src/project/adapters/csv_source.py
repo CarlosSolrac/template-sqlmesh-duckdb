@@ -8,6 +8,8 @@ from typing import Protocol, TypeIs
 import duckdb
 from ruamel.yaml import YAML
 
+from .errors import IngestionError
+
 # Identifiers cannot be bound as parameters, so the DDL below interpolates them; only `<schema>.<table>` names made of
 # plain identifiers, and declared in the contract, ever reach it.
 QUALIFIED_NAME: re.Pattern[str] = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_][A-Za-z0-9_]*")
@@ -30,10 +32,18 @@ class CsvSource:
         The replacement is one transaction, so a load that fails (missing file, a value of the wrong type) keeps the previous table.
 
         Raises:
-            ValueError: `table_name` is not declared in the contract, is not a `<schema>.<table>` name of plain identifiers, or the CSV
-                has columns the contract does not declare.
-            duckdb.Error: the CSV cannot be read, lacks a declared column, or holds a value of the wrong type.
+            IngestionError: `table_name` is not declared in the contract or is not a `<schema>.<table>` name of plain identifiers, the
+                CSV has columns the contract does not declare, or the CSV cannot be read, lacks a declared column, or holds a value of
+                the wrong type.
         """
+        try:
+            return self.replace(con)
+        except (ValueError, duckdb.Error) as error:
+            message: str = f"{self.table_name} was not loaded from {self.path}: {error}"
+            raise IngestionError(message) from error
+
+    def replace(self, con: duckdb.DuckDBPyConnection) -> int:
+        """Replace the table in one transaction and return the row count; `load` turns what this raises into an `IngestionError`."""
         column_types: dict[str, str] = declared_columns(self.contract, self.table_name)
         schema: str = schema_of(self.table_name)
         relation: duckdb.DuckDBPyRelation = con.read_csv(self.path, dtype=column_types)

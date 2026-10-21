@@ -15,7 +15,11 @@ class RawSource(Protocol):
         ...
 
     def load(self, con: duckdb.DuckDBPyConnection) -> int:
-        """Create or replace the raw table on the given connection and return its row count."""
+        """Create or replace the raw table on the given connection and return its row count.
+
+        Raises:
+            project.adapters.errors.IngestionError: the source cannot be loaded; the previous table is kept.
+        """
         ...
 
 

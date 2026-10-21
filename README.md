@@ -45,7 +45,7 @@ the model tests alone, on their own fixture rows, use `uv run sqlmesh test` from
 
 A failed audit leaves the mart at its last good rows (every case found is stopped in staging, before the mart); what each failure leaves behind is in the
 [error flow](docs/design.md#14-error-flow) and [findings](docs/design.md#12-findings). An ingestion error (missing file, undeclared
-column, wrong type) ends the run with a traceback before anything is planned.
+column, wrong type) is logged and ends the run with exit 1 before anything is planned; the raw table keeps its previous rows.
 
 ## Checks
 

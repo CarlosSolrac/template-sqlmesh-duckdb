@@ -11,6 +11,7 @@ from sqlmesh.core.console import set_console
 from sqlmesh.utils.errors import PlanError
 
 from .adapters.csv_source import CsvSource
+from .adapters.errors import IngestionError
 from .diagnostics import FailureLog
 from .ports import Planner, RawSource
 
@@ -47,12 +48,16 @@ def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConne
         open_planner: Opens SQLMesh on the warehouse.
 
     Returns:
-        0 when every plan applied; 1 when one failed; after a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows, while a failed model test applies nothing.
+        0 when every plan applied; 1 when a source could not be ingested (nothing is planned) or a plan failed; after a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows, while a failed model test applies nothing.
 
     Raises:
-        Exception: whatever a source raises; nothing is planned then.
+        Exception: whatever a source raises other than `IngestionError`; nothing is planned then.
     """
-    ingest(sources, connect)
+    try:
+        ingest(sources, connect)
+    except IngestionError:
+        logger.exception("The pipeline stopped before planning: a raw source could not be loaded, and its raw table keeps its previous rows.")
+        return 1
     try:
         transform([source.table_name for source in sources], open_planner)
     except PlanError:

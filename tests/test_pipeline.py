@@ -98,6 +98,17 @@ def test_two_different_versions_of_an_order_with_the_same_timestamp_exit_1_and_t
     assert mart_rows(project) == SAMPLE_MART
 
 
+def test_a_csv_with_an_undeclared_column_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path, caplog: pytest.LogCaptureFixture) -> None:
+    assert main(project) == 0
+    (project / "data" / "orders.csv").write_text("order_id,customer_id,amount,ordered_at,coupon\n9,9,1.00,2026-10-03 09:00:00+00,X\n", encoding="utf-8", newline="\n")
+
+    status: int = main(project)
+
+    assert status == 1
+    assert mart_rows(project) == SAMPLE_MART
+    assert "coupon" in caplog.text
+
+
 def test_a_same_day_rerun_picks_up_new_rows(project: Path) -> None:
     assert main(project) == 0
     add_orders(project, "4,9,3.00,2026-10-02 12:00:00+00\n")
