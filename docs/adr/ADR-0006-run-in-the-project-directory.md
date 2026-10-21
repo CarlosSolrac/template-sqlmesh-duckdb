@@ -1,0 +1,7 @@
+### ADR-0006: Run the pipeline with the project directory as the working directory
+- Status: Accepted
+- Date: 2026-10-18
+- Context: SQLMesh resolves `config.yaml`'s relative `database: data/warehouse.duckdb` against the process working directory, not against `Context(paths=...)`. The draft's `main.py` computed the warehouse path from `__file__`, so a run started outside the repository root ingested into one `warehouse.duckdb` while SQLMesh opened another.
+- Decision: `main(project_dir=PROJECT_DIR)` runs the whole pipeline inside `contextlib.chdir(project_dir)`, after resolving `project_dir` to an absolute path. `config.yaml` stays the only place that names the database.
+- Alternatives: default `project_dir` to `Path.cwd()` like the `sqlmesh` CLI, rejected because `uv run project` from a subfolder would then fail on a missing CSV; build SQLMesh's `Config` in Python with an absolute path, rejected because it duplicates `config.yaml` and lets the CLI and `main()` diverge; document "run from the root", rejected because the two-warehouses bug would stay.
+- Consequences: `uv run project` works from any directory. The working directory is process-global state for the length of the run, which is fine for a CLI entry point but not thread-safe. The end-to-end tests start in a directory outside the project copy, which proves the behaviour; removing the `chdir` makes them fail.
