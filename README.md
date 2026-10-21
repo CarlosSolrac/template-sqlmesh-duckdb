@@ -50,7 +50,7 @@ uv run sqlmesh plan --restate-model raw.orders --auto-apply --no-prompts  # test
 The second reruns the plan on the raw table the failed run loaded, so it writes to the warehouse as the run does. It needs SQLMesh's
 `prod` environment, which the first successful run creates; until then, use `uv run sqlmesh plan --auto-apply --no-prompts`.
 
-A failed staging audit leaves the mart at its last good rows; what each failure leaves behind is in the
+A failed audit leaves the mart at its last good rows (every case found is stopped in staging, before the mart); what each failure leaves behind is in the
 [error flow](docs/design.md#14-error-flow) and [findings](docs/design.md#12-findings). An ingestion error (missing file, undeclared
 column, wrong type) ends the run with a traceback before anything is planned.
 

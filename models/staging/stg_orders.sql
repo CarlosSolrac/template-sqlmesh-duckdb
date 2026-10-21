@@ -3,7 +3,7 @@ MODEL (
   kind FULL,
   grain order_id,
   audits (
-    not_null(columns := (order_id, customer_id, ordered_at_utc)),
+    not_null(columns := (order_id, customer_id, amount, ordered_at_utc)),
     unique_values(columns := (order_id)),
     assert_positive_amount
   )
