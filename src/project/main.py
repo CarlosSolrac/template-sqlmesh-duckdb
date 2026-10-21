@@ -7,9 +7,11 @@ from pathlib import Path
 
 import duckdb
 from sqlmesh import Context
+from sqlmesh.core.console import set_console
 from sqlmesh.utils.errors import PlanError
 
 from .adapters.csv_source import CsvSource
+from .diagnostics import FailureLog
 from .ports import Planner, RawSource
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ def main(project_dir: Path = PROJECT_DIR) -> int:
     logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
     logger.setLevel(logging.INFO)
     root: Path = project_dir.resolve()
+    set_console(FailureLog())
     with contextlib.chdir(root):
         data_dir: Path = root / "data"
         data_dir.mkdir(exist_ok=True)
@@ -54,7 +57,7 @@ def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConne
         transform([source.table_name for source in sources], open_planner)
     except PlanError:
         logger.exception(
-            "The pipeline stopped. After a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows; a failed model test applies nothing. `uv run sqlmesh test` runs the model tests; `uv run sqlmesh plan --restate-model <raw table> --auto-apply --no-prompts` shows which audit failed, writes to the warehouse, and needs one successful run first."
+            "The pipeline stopped. After a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows; a failed model test applies nothing. The audit or model test that failed is logged above."
         )
         return 1
     return 0

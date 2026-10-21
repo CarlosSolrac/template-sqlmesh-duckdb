@@ -56,7 +56,7 @@ def test_a_full_run_from_an_empty_warehouse_exits_0_and_fills_the_mart(project: 
     assert logging.getLogger().getEffectiveLevel() == logging.WARNING
 
 
-def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path) -> None:
+def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path, caplog: pytest.LogCaptureFixture) -> None:
     assert main(project) == 0
     add_orders(project, "4,9,-3.00,2026-10-02 12:00:00+00\n")
 
@@ -64,6 +64,18 @@ def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project
 
     assert status == 1
     assert mart_rows(project) == SAMPLE_MART
+    assert "orders.stg_orders" in caplog.text
+    assert "'assert_positive_amount' audit error: 1 row failed" in caplog.text
+
+
+def test_a_failing_model_test_exits_1_and_the_log_names_the_test(project: Path, caplog: pytest.LogCaptureFixture) -> None:
+    tests_file: Path = project / "tests" / "test_models.yaml"
+    tests_file.write_text(tests_file.read_text(encoding="utf-8").replace("revenue: 20.00", "revenue: 21.00"), encoding="utf-8", newline="\n")
+
+    status: int = main(project)
+
+    assert status == 1
+    assert "test_fct_daily_revenue_sums_by_day" in caplog.text
 
 
 def test_a_day_whose_only_order_has_no_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project: Path) -> None:
