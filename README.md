@@ -36,7 +36,7 @@ uv run project
 
 `uv run project` replaces `raw.orders` with `data/orders.csv`, then lets SQLMesh run the model tests, apply the models, and restate
 everything downstream of the raw table, so a same-day rerun picks up new rows
-([ADR-0002](docs/adr/ADR-0002-replace-and-restate.md)). It exits 0 when every plan applied and 1 when an audit or a model test failed.
+([ADR-0002](docs/adr/ADR-0002-replace-and-restate.md)). It exits 0 when every plan applied and 1 when the CSV could not be ingested, an audit failed or a model test failed.
 It runs with the repository as its working directory, so it works from any directory inside it; it creates `data/` if missing. `data/`
 (input and warehouse) is git-ignored.
 
@@ -68,6 +68,8 @@ base branch, and `pip-audit`. After changing a model's `FROM`, regenerate the li
   [non-functional requirements](docs/design.md#11-non-functional-requirements), [findings](docs/design.md#12-findings),
   [error flow](docs/design.md#14-error-flow) and [open questions](docs/design.md#open-questions).
 - [docs/adr/](docs/adr/): [ADR-0001](docs/adr/ADR-0001-sqlmesh-with-exit-path.md), SQLMesh with an exit path;
-  [ADR-0002](docs/adr/ADR-0002-replace-and-restate.md), replace raw tables and restate downstream on every run.
+  [ADR-0002](docs/adr/ADR-0002-replace-and-restate.md), replace raw tables and restate downstream on every run;
+  [ADR-0003](docs/adr/ADR-0003-planner-port.md) to [ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md), the `Planner` port,
+  the contract-typed `CsvSource`, rejecting undeclared CSV columns, and running in the project directory.
 - [docs/lineage.html](docs/lineage.html): SQLMesh's model lineage, generated (it loads its graph library from unpkg, so it needs
   network to view).
