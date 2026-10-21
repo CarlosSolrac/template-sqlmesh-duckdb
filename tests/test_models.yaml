@@ -5,10 +5,12 @@ test_stg_orders_keeps_latest_version:
       rows:
         - {order_id: 1, customer_id: 7, amount: 10.00, ordered_at: "2026-10-01 10:00:00+00"}
         - {order_id: 1, customer_id: 7, amount: 12.50, ordered_at: "2026-10-01 11:00:00+00"}
+        - {order_id: 2, customer_id: 8, amount: 7.50, ordered_at: "2026-10-01 13:00:00+02"}
   outputs:
     query:
       rows:
         - {order_id: 1, customer_id: 7, amount: 12.50, ordered_at_utc: "2026-10-01 11:00:00"}
+        - {order_id: 2, customer_id: 8, amount: 7.50, ordered_at_utc: "2026-10-01 11:00:00"}
 
 test_fct_daily_revenue_sums_by_day:
   model: orders.fct_daily_revenue
