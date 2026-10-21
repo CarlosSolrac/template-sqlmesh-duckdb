@@ -5,7 +5,8 @@ MODEL (
   audits (
     not_null(columns := (order_id, customer_id, amount, ordered_at_utc)),
     unique_values(columns := (order_id)),
-    assert_positive_amount
+    assert_positive_amount,
+    assert_no_tied_versions
   )
 );
 

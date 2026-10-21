@@ -76,6 +76,16 @@ def test_a_day_whose_only_order_has_no_amount_exits_1_and_the_mart_keeps_its_las
     assert mart_rows(project) == SAMPLE_MART
 
 
+def test_two_different_versions_of_an_order_with_the_same_timestamp_exit_1_and_the_mart_keeps_its_last_good_rows(project: Path) -> None:
+    assert main(project) == 0
+    add_orders(project, "1,7,99.00,2026-10-01 11:00:00+00\n")
+
+    status: int = main(project)
+
+    assert status == 1
+    assert mart_rows(project) == SAMPLE_MART
+
+
 def test_a_same_day_rerun_picks_up_new_rows(project: Path) -> None:
     assert main(project) == 0
     add_orders(project, "4,9,3.00,2026-10-02 12:00:00+00\n")
