@@ -11,6 +11,7 @@ from sqlmesh.core.console import set_console
 from sqlmesh.utils.errors import PlanError
 
 from .adapters.csv_source import CsvSource, IngestionError
+from .adapters.staged_warehouse import StagedWarehouse
 from .diagnostics import FailureLog
 from .ports import Planner, RawSource
 
@@ -21,20 +22,28 @@ PROJECT_DIR: Path = Path(__file__).resolve().parents[2]
 def main(project_dir: Path = PROJECT_DIR) -> int:
     """Wire the adapters and run the pipeline on the SQLMesh project in `project_dir`; return the exit status.
 
-    The run happens with `project_dir` as the working directory, because SQLMesh resolves `config.yaml`'s relative warehouse path
-    against it, and ingestion must write to the same file. A relative `project_dir` is resolved against the caller's working directory.
-    Only this module logs at INFO; the root logger stays at WARNING, so SQLMesh does not log every statement it runs.
+    The run builds on a copy of the warehouse (`StagedWarehouse`), which replaces the live file only when every plan applied; after a
+    failure the live warehouse is untouched and the copy is kept as `data/warehouse.failed.duckdb`. The run happens with the copy's
+    directory as the working directory, because SQLMesh resolves `config.yaml`'s relative warehouse path against it, and ingestion must
+    write to the same file. A relative `project_dir` is resolved against the caller's working directory. Only this module logs at INFO;
+    the root logger stays at WARNING, so SQLMesh does not log every statement it runs.
     """
     logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
     logger.setLevel(logging.INFO)
     root: Path = project_dir.resolve()
     set_console(FailureLog())
-    with contextlib.chdir(root):
-        data_dir: Path = root / "data"
-        data_dir.mkdir(exist_ok=True)
-        warehouse: Path = data_dir / "warehouse.duckdb"
-        sources: list[RawSource] = [CsvSource(table_name="raw.orders", path=data_dir / "orders.csv", contract=root / "external_models.yaml")]
-        return run(sources, lambda: duckdb.connect(warehouse), lambda: Context(paths=str(root)))
+    staged: StagedWarehouse = StagedWarehouse(root)
+    status: int = 1
+    try:
+        with contextlib.chdir(staged.prepare()):
+            sources: list[RawSource] = [CsvSource(table_name="raw.orders", path=root / "data" / "orders.csv", contract=root / "external_models.yaml")]
+            status = run(sources, lambda: duckdb.connect(staged.build), lambda: Context(paths=str(root)))
+    finally:
+        if status == 0:
+            staged.commit()
+        else:
+            staged.discard()
+    return status
 
 
 def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConnection], open_planner: Callable[[], Planner]) -> int:
