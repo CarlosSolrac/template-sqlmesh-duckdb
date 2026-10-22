@@ -53,5 +53,14 @@ jobs:
       - name: No unapproved suppressions on this branch
         run: uv run python -m tools.check_suppressions --base origin/${{ github.base_ref || 'main' }}
 
+      # A model edit that leaves the model tests and the end-to-end tests untouched can ship with a stale test that still passes.
+      - name: A model change comes with a test change
+        run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref || 'main' }}...HEAD")
+          if echo "$changed" | grep -q '^models/' && ! echo "$changed" | grep -qE '^tests/(test_models\.yaml|test_pipeline\.py)$'; then
+            echo "models/ changed, but neither tests/test_models.yaml nor tests/test_pipeline.py did."
+            exit 1
+          fi
+
       - name: Dependencies with known vulnerabilities
         run: uv run pip-audit

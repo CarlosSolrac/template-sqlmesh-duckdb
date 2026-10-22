@@ -47,6 +47,13 @@ repos:
         # Whole-project check: an import or a pyproject.toml edit can break it.
         files: (\.py|pyproject\.toml)$
         pass_filenames: false
+      - id: import-linter
+        name: import contract (import-linter)
+        entry: uv run lint-imports
+        language: system
+        # Whole-project check: any import or contract edit can break it.
+        files: (\.py|pyproject\.toml)$
+        pass_filenames: false
   # Scans staged content only, so it guards commits; pre-commit installs Go itself.
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1

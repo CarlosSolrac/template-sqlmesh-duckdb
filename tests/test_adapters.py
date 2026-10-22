@@ -5,7 +5,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from project.adapters.csv_source import CsvSource
+from project.adapters.csv_source import CsvSource, IngestionError
 from project.ports import RawSource
 
 ROOT: Path = Path(__file__).resolve().parents[1]
@@ -49,7 +49,7 @@ def test_csv_source_keeps_the_existing_table_when_a_reload_fails(csv_text: str |
     con: duckdb.DuckDBPyConnection = duckdb.connect(":memory:")
     CsvSource(table_name="raw.orders", path=SAMPLE_CSV, contract=CONTRACT).load(con)
 
-    with pytest.raises(duckdb.Error):
+    with pytest.raises(IngestionError):
         CsvSource(table_name="raw.orders", path=csv_path, contract=CONTRACT).load(con)
 
     assert con.table("raw.orders").shape[0] == 4
@@ -60,7 +60,7 @@ def test_csv_source_rejects_columns_the_contract_does_not_declare_before_any_ddl
     csv_path.write_text("order_id,customer_id,amount,ordered_at,coupon\n1,7,10.00,2026-10-01 10:00:00+00,FALL10\n", encoding="utf-8")
     con: duckdb.DuckDBPyConnection = duckdb.connect(":memory:")
 
-    with pytest.raises(ValueError, match=r"has columns \['coupon'\] that 'raw\.orders' does not declare"):
+    with pytest.raises(IngestionError, match=r"has columns \['coupon'\] that 'raw\.orders' does not declare"):
         CsvSource(table_name="raw.orders", path=csv_path, contract=CONTRACT).load(con)
 
     assert con.execute(SCHEMAS_QUERY).fetchall() == []
@@ -74,7 +74,7 @@ def test_csv_source_rejects_columns_the_contract_does_not_declare_before_any_ddl
 def test_csv_source_rejects_a_table_the_contract_does_not_declare_before_any_ddl(table_name: str) -> None:
     con: duckdb.DuckDBPyConnection = duckdb.connect(":memory:")
 
-    with pytest.raises(ValueError, match="is not declared in"):
+    with pytest.raises(IngestionError, match="is not declared in"):
         CsvSource(table_name=table_name, path=SAMPLE_CSV, contract=CONTRACT).load(con)
 
     assert con.execute(SCHEMAS_QUERY).fetchall() == []
@@ -90,7 +90,7 @@ def test_csv_source_rejects_a_declared_name_that_is_not_schema_dot_table_before_
     contract.write_text(f"- name: '{declared_name}'\n  columns:\n    order_id: INTEGER\n", encoding="utf-8")
     con: duckdb.DuckDBPyConnection = duckdb.connect(":memory:")
 
-    with pytest.raises(ValueError, match=r"is not a <schema>\.<table> name"):
+    with pytest.raises(IngestionError, match=r"is not a <schema>\.<table> name"):
         CsvSource(table_name=declared_name, path=SAMPLE_CSV, contract=contract).load(con)
 
     assert con.execute(SCHEMAS_QUERY).fetchall() == []
@@ -106,7 +106,7 @@ def test_csv_source_rejects_a_malformed_contract_before_any_ddl(contract_text: s
     contract.write_text(contract_text, encoding="utf-8")
     con: duckdb.DuckDBPyConnection = duckdb.connect(":memory:")
 
-    with pytest.raises(ValueError, match="is not declared in"):
+    with pytest.raises(IngestionError, match="is not declared in"):
         CsvSource(table_name="raw.orders", path=SAMPLE_CSV, contract=contract).load(con)
 
     assert con.execute(SCHEMAS_QUERY).fetchall() == []

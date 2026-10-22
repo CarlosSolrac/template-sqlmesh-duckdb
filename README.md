@@ -36,23 +36,16 @@ uv run project
 
 `uv run project` replaces `raw.orders` with `data/orders.csv`, then lets SQLMesh run the model tests, apply the models, and restate
 everything downstream of the raw table, so a same-day rerun picks up new rows
-([ADR-0002](docs/adr/ADR-0002-replace-and-restate.md)). It exits 0 when every plan applied and 1 when an audit or a model test failed.
-It runs with the repository as its working directory, so it works from any directory inside it; it creates `data/` if missing. `data/`
-(input and warehouse) is git-ignored.
+([ADR-0002](docs/adr/ADR-0002-replace-and-restate.md)). It exits 0 when every plan applied and 1 when the CSV could not be ingested, an audit failed or a model test failed.
+A run builds on a copy of the warehouse and swaps it in only when it succeeds
+([ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md)), so `data/warehouse.duckdb` never holds rows an audit rejected, and a failed
+run leaves it unchanged. The copy of the failed run is kept as `data/warehouse.failed.duckdb`; open it with DuckDB to see the rejected
+rows. A run works from any directory ([ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md)) and creates `data/` if missing.
+`data/` (input, warehouse, the failed copy and the in-progress `data/.build`) is git-ignored.
 
-When a run exits 1, its own output does not name the failing audit or test. These do (run `sqlmesh` commands from the repository root):
-
-```sh
-uv run sqlmesh test                                                       # model tests only, on their own fixture rows
-uv run sqlmesh plan --restate-model raw.orders --auto-apply --no-prompts  # tests and audits
-```
-
-The second reruns the plan on the raw table the failed run loaded, so it writes to the warehouse as the run does. It needs SQLMesh's
-`prod` environment, which the first successful run creates; until then, use `uv run sqlmesh plan --auto-apply --no-prompts`.
-
-A failed audit leaves the mart at its last good rows (every case found is stopped in staging, before the mart); what each failure leaves behind is in the
-[error flow](docs/design.md#14-error-flow) and [findings](docs/design.md#12-findings). An ingestion error (missing file, undeclared
-column, wrong type) ends the run with a traceback before anything is planned.
+When a run exits 1, its output names the audit that failed (with the model it belongs to) or the model test that failed, or the
+ingestion error. To run the model tests alone, on their own fixture rows, use `uv run sqlmesh test` from the repository root. What each
+failure leaves behind is in the [error flow](docs/design.md#14-error-flow) and [findings](docs/design.md#12-findings).
 
 ## Checks
 
@@ -75,6 +68,9 @@ base branch, and `pip-audit`. After changing a model's `FROM`, regenerate the li
   [non-functional requirements](docs/design.md#11-non-functional-requirements), [findings](docs/design.md#12-findings),
   [error flow](docs/design.md#14-error-flow) and [open questions](docs/design.md#open-questions).
 - [docs/adr/](docs/adr/): [ADR-0001](docs/adr/ADR-0001-sqlmesh-with-exit-path.md), SQLMesh with an exit path;
-  [ADR-0002](docs/adr/ADR-0002-replace-and-restate.md), replace raw tables and restate downstream on every run.
+  [ADR-0002](docs/adr/ADR-0002-replace-and-restate.md), replace raw tables and restate downstream on every run;
+  [ADR-0003](docs/adr/ADR-0003-planner-port.md) to [ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md), the `Planner` port,
+  the contract-typed `CsvSource`, rejecting undeclared CSV columns, and running in the project directory;
+  [ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md), build each run on a copy of the warehouse and swap it in on success.
 - [docs/lineage.html](docs/lineage.html): SQLMesh's model lineage, generated (it loads its graph library from unpkg, so it needs
   network to view).
