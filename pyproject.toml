@@ -193,3 +193,8 @@ root_packages = ["project"]
 name = "Dependencies point inward"
 type = "layers"
 layers = ["project.main", "project.adapters | project.diagnostics", "project.ports"]
+
+[tool.deptry]
+# deptry looks for first-party modules in the repository root, not in src/, so without this it reports `import project` as a
+# transitive dependency.
+known_first_party = ["project"]

@@ -6,6 +6,10 @@ from typing import Protocol
 import duckdb
 
 
+class IngestionError(Exception):
+    """A raw source could not be loaded; the run stops before anything is planned and the warehouse keeps its previous raw table."""
+
+
 class RawSource(Protocol):
     """Port that lands one raw table in the warehouse; its schema must match `external_models.yaml`."""
 
@@ -18,7 +22,7 @@ class RawSource(Protocol):
         """Create or replace the raw table on the given connection and return its row count.
 
         Raises:
-            project.adapters.csv_source.IngestionError: the source cannot be loaded; the previous table is kept.
+            IngestionError: the source cannot be loaded; the previous table is kept.
         """
         ...
 

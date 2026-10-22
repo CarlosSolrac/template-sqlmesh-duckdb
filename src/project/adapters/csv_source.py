@@ -8,13 +8,11 @@ from typing import Protocol, TypeIs
 import duckdb
 from ruamel.yaml import YAML
 
+from project.ports import IngestionError
+
 # Identifiers cannot be bound as parameters, so the DDL below interpolates them; only `<schema>.<table>` names made of
 # plain identifiers, and declared in the contract, ever reach it.
 QUALIFIED_NAME: re.Pattern[str] = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_][A-Za-z0-9_]*")
-
-
-class IngestionError(Exception):
-    """A raw source could not be loaded; the run stops before anything is planned and the warehouse keeps its previous raw table."""
 
 
 @dataclass(frozen=True, slots=True)

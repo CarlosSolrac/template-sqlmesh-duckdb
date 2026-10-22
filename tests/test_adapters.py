@@ -5,8 +5,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from project.adapters.csv_source import CsvSource, IngestionError
-from project.ports import RawSource
+from project.adapters.csv_source import CsvSource
+from project.ports import IngestionError, RawSource
 
 ROOT: Path = Path(__file__).resolve().parents[1]
 CONTRACT: Path = ROOT / "external_models.yaml"
