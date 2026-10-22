@@ -25,6 +25,7 @@ dev = [
     "complexipy>=8,<9",           # cognitive complexity cap, see [tool.complexipy]
     "deptry>=0.25,<0.26",         # unused, missing, and transitive dependencies
     "diff-cover>=10,<11",        # CI: 100% coverage of changed lines
+    "import-linter>=2,<3",        # import contract, see [tool.importlinter]
     "mutmut>=3.8,<4; sys_platform != 'win32'",  # needs os.fork; on Windows run it through WSL
     "mypy>=2.4,<3",
     "pip-audit>=2.10,<3",         # CI: dependencies with known vulnerabilities
@@ -181,3 +182,14 @@ branch = true
 # lines at 100% either way.
 fail_under = 100
 show_missing = true
+
+[tool.importlinter]
+root_packages = ["project"]
+
+# Same direction as the component flowchart in docs/design.md: the composition root may import everything below it; the adapters and
+# the diagnostics console are independent of each other; nothing imports upward. `CsvSource` satisfies `RawSource` structurally, so
+# the adapters do not import the ports.
+[[tool.importlinter.contracts]]
+name = "Dependencies point inward"
+type = "layers"
+layers = ["project.main", "project.adapters | project.diagnostics", "project.ports"]
