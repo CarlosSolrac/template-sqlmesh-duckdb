@@ -75,6 +75,8 @@ def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project
     assert mart_rows(project) == SAMPLE_MART
     assert "orders.stg_orders" in caplog.text
     assert "'assert_positive_amount' audit error: 1 row failed" in caplog.text
+    assert "The live warehouse is unchanged" in caplog.text
+    assert "warehouse.failed.duckdb" in caplog.text
     assert query(project / "data" / "warehouse.duckdb", "SELECT count(*) FROM orders.stg_orders WHERE amount <= 0") == [(0,)]
     assert query(project / "data" / "warehouse.failed.duckdb", "SELECT count(*) FROM orders.stg_orders WHERE amount <= 0") == [(1,)]
 

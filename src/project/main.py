@@ -43,6 +43,7 @@ def main(project_dir: Path = PROJECT_DIR) -> int:
             staged.commit()
         else:
             staged.discard()
+            logger.error("The live warehouse is unchanged; the rows of the failed run are kept in %s.", staged.failed)
     return status
 
 
@@ -56,7 +57,7 @@ def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConne
         open_planner: Opens SQLMesh on the warehouse.
 
     Returns:
-        0 when every plan applied; 1 when a source could not be ingested (nothing is planned) or a plan failed; after a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows, while a failed model test applies nothing.
+        0 when every plan applied; 1 when a source could not be ingested (nothing is planned) or a plan failed; the audit or model test that failed is logged.
 
     Raises:
         Exception: whatever a source raises other than `IngestionError`; nothing is planned then.
@@ -69,9 +70,7 @@ def run(sources: Sequence[RawSource], connect: Callable[[], duckdb.DuckDBPyConne
     try:
         transform([source.table_name for source in sources], open_planner)
     except PlanError:
-        logger.exception(
-            "The pipeline stopped. After a failed audit, the model that failed it keeps the rows that failed and the models downstream of it keep their last good rows; a failed model test applies nothing. The audit or model test that failed is logged above."
-        )
+        logger.exception("The pipeline stopped; the audit or model test that failed is logged above.")
         return 1
     return 0
 
@@ -92,8 +91,8 @@ def transform(raw_tables: Sequence[str], open_planner: Callable[[], Planner]) ->
     """Apply model changes to prod, then restate every model downstream of the freshly ingested raw tables.
 
     The adapters replace raw tables on every run, so already-computed intervals must be restated; a plain `run()` would treat them as
-    done and silently skip the new data. A failing audit raises `PlanError`: downstream models are skipped, but the failing model's own
-    table keeps the rows that failed until fixed.
+    done and silently skip the new data. A failing audit or model test raises `PlanError`; the caller decides what
+    becomes of the warehouse the plans were applied to.
     """
     planner: Planner = open_planner()
     try:
