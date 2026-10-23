@@ -10,10 +10,10 @@ from sqlmesh import Context
 from sqlmesh.core.console import set_console
 from sqlmesh.utils.errors import PlanError
 
-from .adapters.csv_source import CsvSource, IngestionError
-from .adapters.staged_warehouse import StagedWarehouse
+from .adapters.csv_source import CsvSource
+from .adapters.staged_warehouse import FAILED_PATTERN, StagedWarehouse
 from .diagnostics import FailureLog
-from .ports import Planner, RawSource
+from .ports import IngestionError, Planner, RawSource
 
 logger: logging.Logger = logging.getLogger(__name__)
 PROJECT_DIR: Path = Path(__file__).resolve().parents[2]
@@ -23,7 +23,7 @@ def main(project_dir: Path = PROJECT_DIR) -> int:
     """Wire the adapters and run the pipeline on the SQLMesh project in `project_dir`; return the exit status.
 
     The run builds on a copy of the warehouse (`StagedWarehouse`), which replaces the live file only when every plan applied; after a
-    failure the live warehouse is untouched and the copy is kept as `data/warehouse.failed.duckdb`. The run happens with the copy's
+    failure the live warehouse is untouched and the copy is kept as `data/warehouse.failed-<timestamp>.duckdb`. The run happens with the copy's
     directory as the working directory, because SQLMesh resolves `config.yaml`'s relative warehouse path against it, and ingestion must
     write to the same file. A relative `project_dir` is resolved against the caller's working directory. Only this module logs at INFO;
     the root logger stays at WARNING, so SQLMesh does not log every statement it runs.
@@ -43,7 +43,7 @@ def main(project_dir: Path = PROJECT_DIR) -> int:
             staged.commit()
         else:
             staged.discard()
-            logger.error("The live warehouse is unchanged; the rows of the failed run are kept in %s.", staged.failed)
+            logger.error("The live warehouse is unchanged; the rows of the failed run are kept in %s.", staged.live.parent / FAILED_PATTERN)
     return status
 
 

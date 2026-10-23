@@ -49,6 +49,11 @@ def query(database: Path, sql: str) -> list[tuple[object, ...]]:
         return con.execute(sql).fetchall()
 
 
+def failed_copy(project: Path) -> Path:
+    """Return the newest kept copy of a failed run."""
+    return max((project / "data").glob("warehouse.failed-*.duckdb"))
+
+
 def mart_rows(project: Path) -> list[tuple[date, int, Decimal]]:
     """Read the daily revenue mart from the project's warehouse."""
     con: duckdb.DuckDBPyConnection
@@ -76,9 +81,9 @@ def test_a_negative_amount_exits_1_and_the_mart_keeps_its_last_good_rows(project
     assert "orders.stg_orders" in caplog.text
     assert "'assert_positive_amount' audit error: 1 row failed" in caplog.text
     assert "The live warehouse is unchanged" in caplog.text
-    assert "warehouse.failed.duckdb" in caplog.text
+    assert "warehouse.failed-*.duckdb" in caplog.text
     assert query(project / "data" / "warehouse.duckdb", "SELECT count(*) FROM orders.stg_orders WHERE amount <= 0") == [(0,)]
-    assert query(project / "data" / "warehouse.failed.duckdb", "SELECT count(*) FROM orders.stg_orders WHERE amount <= 0") == [(1,)]
+    assert query(failed_copy(project), "SELECT count(*) FROM orders.stg_orders WHERE amount <= 0") == [(1,)]
 
 
 def test_a_failing_model_test_exits_1_and_the_log_names_the_test(project: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -134,10 +139,10 @@ def test_a_mart_audit_that_fails_leaves_the_warehouse_at_its_last_good_rows(proj
 
     assert status == 1
     assert mart_rows(project) == SAMPLE_MART
-    assert query(project / "data" / "warehouse.failed.duckdb", MART_QUERY)[-1][2] == Decimal("505.00")
+    assert query(failed_copy(project), MART_QUERY)[-1][2] == Decimal("505.00")
 
 
-def test_a_successful_run_after_a_failed_one_removes_the_failed_copy(project: Path) -> None:
+def test_a_successful_run_after_a_failed_one_keeps_the_failed_copy_and_removes_the_build_directory(project: Path) -> None:
     assert main(project) == 0
     add_orders(project, "4,9,-3.00,2026-10-02 12:00:00+00" + LF)
     assert main(project) == 1
@@ -146,7 +151,7 @@ def test_a_successful_run_after_a_failed_one_removes_the_failed_copy(project: Pa
     status: int = main(project)
 
     assert status == 0
-    assert not (project / "data" / "warehouse.failed.duckdb").exists()
+    assert len(list((project / "data").glob("warehouse.failed-*.duckdb"))) == 1
     assert not (project / "data" / ".build").exists()
 
 

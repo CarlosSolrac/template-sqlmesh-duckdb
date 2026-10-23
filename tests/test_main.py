@@ -8,9 +8,8 @@ import duckdb
 import pytest
 from sqlmesh.utils.errors import PlanError
 
-from project.adapters.csv_source import IngestionError
 from project.main import run
-from project.ports import Planner, RawSource
+from project.ports import IngestionError, Planner, RawSource
 
 
 @dataclass

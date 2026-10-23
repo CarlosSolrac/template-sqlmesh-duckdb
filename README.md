@@ -39,9 +39,9 @@ everything downstream of the raw table, so a same-day rerun picks up new rows
 ([ADR-0002](docs/adr/ADR-0002-replace-and-restate.md)). It exits 0 when every plan applied and 1 when the CSV could not be ingested, an audit failed or a model test failed.
 A run builds on a copy of the warehouse and swaps it in only when it succeeds
 ([ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md)), so `data/warehouse.duckdb` never holds rows an audit rejected, and a failed
-run leaves it unchanged. The copy of the failed run is kept as `data/warehouse.failed.duckdb`; open it with DuckDB to see the rejected
-rows. A run works from any directory ([ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md)) and creates `data/` if missing.
-`data/` (input, warehouse, the failed copy and the in-progress `data/.build`) is git-ignored.
+run leaves it unchanged. The copy of the failed run is kept as `data/warehouse.failed-<timestamp>.duckdb` (the newest three are kept); open one
+with DuckDB to see the rejected rows. A run works from any directory ([ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md)) and creates `data/` if missing.
+`data/` (input, warehouse, the failed copies and the in-progress `data/.build`) is git-ignored.
 
 When a run exits 1, its output names the audit that failed (with the model it belongs to) or the model test that failed, or the
 ingestion error. To run the model tests alone, on their own fixture rows, use `uv run sqlmesh test` from the repository root. What each

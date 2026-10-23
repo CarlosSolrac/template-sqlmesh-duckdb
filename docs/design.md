@@ -14,8 +14,8 @@ file only when the run succeeds.
 ## 1. Size and numbers
 
 - Classification: **Standard**. Three layers (ingestion adapter, SQLMesh models, composition root) around two Protocols, in one
-  process. Pipeline source: 366 lines of Python in `src/project/` and 46 lines of SQL in `models/` and `audits/`, plus 14 lines of
-  SQLMesh configuration (`config.yaml`, `external_models.yaml`). Tests: 547 lines of Python, 3 of SQL and 27 of YAML. `tools/` holds
+  process. Pipeline source: 383 lines of Python in `src/project/` and 46 lines of SQL in `models/` and `audits/`, plus 14 lines of
+  SQLMesh configuration (`config.yaml`, `external_models.yaml`). Tests: 607 lines of Python, 3 of SQL and 27 of YAML. `tools/` holds
   1,599 lines of vendored python-code-standards checks, which are not part of the pipeline. Counted with
   `git ls-files -z -- '<dir>/*.py' '<dir>/*.sql' | xargs -0 cat | wc -l`.
 - External systems: two, the input file drop (`data/orders.csv`) and the DuckDB warehouse file (`data/warehouse.duckdb`), so the spec
@@ -34,7 +34,7 @@ flowchart LR
     Operator["Operator: starts a run, reads its exit status and log"]
     Upstream[["Upstream export: drops the orders file ?"]]:::inferred
     Warehouse[("DuckDB file data/warehouse.duckdb: keeps raw, staging and mart tables between runs; only a successful run replaces it")]
-    Failed[("data/warehouse.failed.duckdb: the last failed run, with the rows an audit rejected")]
+    Failed[("data/warehouse.failed-TIMESTAMP.duckdb: the last three failed runs, with the rows an audit rejected")]
     Consumers["Mart consumers: read marts only ?"]:::inferred
     subgraph System["Orders pipeline (one Python process)"]
         Pipeline["project: build on a copy of the warehouse, land the raw orders, plan and restate the models"]
@@ -78,7 +78,7 @@ stateDiagram-v2
 ```
 
 A run blocked by any audit, staging or mart, leaves the live warehouse as it was; the rows that failed are in the run's copy, kept as
-`data/warehouse.failed.duckdb` (section 12, finding 2). An order with a NULL `amount` fails staging's `not_null` (finding 1, fixed),
+`data/warehouse.failed-<timestamp>.duckdb` (section 12, finding 2). An order with a NULL `amount` fails staging's `not_null` (finding 1, fixed),
 and two versions of an order with the same `ordered_at` and different content fail `assert_no_tied_versions` (finding 3, fixed).
 
 ## 5. Components
@@ -135,10 +135,10 @@ flowchart LR
 | Main | `src/project/main.py:22-47`: console `src/project/main.py:34`, staged warehouse `src/project/main.py:35`, working directory is the build directory `src/project/main.py:38`, chooses `CsvSource` `src/project/main.py:39` and `Context` `src/project/main.py:40`, commit or discard `src/project/main.py:41-46` |
 | Run | `src/project/main.py:50-75`; `ingest` closes the connection before SQLMesh opens the file `src/project/main.py:78-87`; `transform` plans, then restates `src/project/main.py:90-102`; `IngestionError` → 1 `src/project/main.py:67-69`; `PlanError` → 1 `src/project/main.py:72-74` |
 | Log | `src/project/diagnostics.py:13-32`, installed with `set_console` at `src/project/main.py:34` |
-| Staged | `src/project/adapters/staged_warehouse.py:13-69`: copy `src/project/adapters/staged_warehouse.py:43-55`, swap in `src/project/adapters/staged_warehouse.py:57-62`, keep as failed copy `src/project/adapters/staged_warehouse.py:64-69` |
-| Csv | `src/project/adapters/csv_source.py:20-65`: errors become `IngestionError` `src/project/adapters/csv_source.py:41-45`, declared tables and their column types `src/project/adapters/csv_source.py:80-95`, `<schema>.<table>` names only `src/project/adapters/csv_source.py:98-108`, undeclared columns refused `src/project/adapters/csv_source.py:52-55`, one transaction `src/project/adapters/csv_source.py:56-65` |
-| RawSource | `src/project/ports.py:9-23` |
-| Planner | `src/project/ports.py:26-39`; `sqlmesh.Context` passed where a `Planner` is expected, `src/project/main.py:40` |
+| Staged | `src/project/adapters/staged_warehouse.py:21-84`: copy `src/project/adapters/staged_warehouse.py:52-64`, swap in `src/project/adapters/staged_warehouse.py:66-70`, keep as a timestamped failed copy and prune the oldest `src/project/adapters/staged_warehouse.py:72-84` |
+| Csv | `src/project/adapters/csv_source.py:19-63`: errors become `IngestionError` `src/project/adapters/csv_source.py:39-43`, declared tables and their column types `src/project/adapters/csv_source.py:78-93`, `<schema>.<table>` names only `src/project/adapters/csv_source.py:96-106`, undeclared columns refused `src/project/adapters/csv_source.py:50-53`, one transaction `src/project/adapters/csv_source.py:54-63` |
+| RawSource | `src/project/ports.py:13-27`; `IngestionError` `src/project/ports.py:9-10` |
+| Planner | `src/project/ports.py:30-43`; `sqlmesh.Context` passed where a `Planner` is expected, `src/project/main.py:40` |
 | Context | `config.yaml:1-8` (DuckDB at `data/warehouse.duckdb`, relative to the working directory, so the run's copy, ADR-0006 and ADR-0007); runs `tests/` before every plan, SQLMesh's default (`skip_tests=False`) |
 | Stg | `models/staging/stg_orders.sql:1-19`: grain `models/staging/stg_orders.sql:4`, audits `models/staging/stg_orders.sql:5-10`, casts `models/staging/stg_orders.sql:14-17`, latest version `models/staging/stg_orders.sql:19` |
 | Fct | `models/marts/fct_daily_revenue.sql:1-16`: grain `models/marts/fct_daily_revenue.sql:4`, audits `models/marts/fct_daily_revenue.sql:5-8`, casts `models/marts/fct_daily_revenue.sql:12-14` |
@@ -151,11 +151,11 @@ flowchart LR
 
 | boundary | input | output | grain/key | invariants | owner | source |
 |---|---|---|---|---|---|---|
-| Command line | `uv run project` | exit status and log | one run | 0 when both plans applied, and then the live warehouse is replaced; 1 on `IngestionError` (logged, nothing planned) or `PlanError` (a failing audit or model test, named in the log), and then the live warehouse is unchanged and the run's copy is kept as `data/warehouse.failed.duckdb` | `main` | `pyproject.toml:16-17`, `src/project/main.py:22-47` |
-| Warehouse file | the live `data/warehouse.duckdb` | a copy at `data/.build/data/warehouse.duckdb`; on success the copy replaces the live file with one `os.replace`, on failure it becomes `data/warehouse.failed.duckdb` | one file | the live file is never written during a run; a leftover `.build` from an interrupted run is removed first; a leftover write-ahead log of the live file is removed on commit | `StagedWarehouse` | `src/project/adapters/staged_warehouse.py:43-69` |
-| Ingestion | `data/orders.csv` with a header row | `raw.orders`: `order_id INTEGER`, `customer_id INTEGER`, `amount DECIMAL(12, 2)`, `ordered_at TIMESTAMPTZ` | one row per CSV row; raw rows before deduplication, no key | table declared in `external_models.yaml` as `<schema>.<table>` of plain identifiers; no undeclared column ([ADR-0005](adr/ADR-0005-reject-undeclared-csv-columns.md)); declared columns present with their types; replaced, never appended, in one transaction, so a failed load keeps the previous rows; every failure is an `IngestionError` | `CsvSource` | `src/project/adapters/csv_source.py:31-65`, `src/project/adapters/csv_source.py:80-108`, `external_models.yaml:1-6` |
-| `RawSource` port | `duckdb.DuckDBPyConnection` | the raw table replaced; its row count as `int` | one call per raw table | `table_name` is read-only (`@property`); the table's schema matches `external_models.yaml`; a failure raises `IngestionError` | composition root | `src/project/ports.py:9-23` |
-| `Planner` port | `restate_models: Iterable[str] \| None`, `no_prompts`, `auto_apply` | the plan applied to prod, or `PlanError` | one plan per call | model tests run before planning; a failing audit raises `PlanError` and skips downstream models; `close()` releases the warehouse file | composition root (`sqlmesh.Context` satisfies it, [ADR-0003](adr/ADR-0003-planner-port.md)) | `src/project/ports.py:26-39`, `src/project/main.py:90-102` |
+| Command line | `uv run project` | exit status and log | one run | 0 when both plans applied, and then the live warehouse is replaced; 1 on `IngestionError` (logged, nothing planned) or `PlanError` (a failing audit or model test, named in the log), and then the live warehouse is unchanged and the run's copy is kept as `data/warehouse.failed-<timestamp>.duckdb` | `main` | `pyproject.toml:16-17`, `src/project/main.py:22-47` |
+| Warehouse file | the live `data/warehouse.duckdb` | a copy at `data/.build/data/warehouse.duckdb`; on success the copy replaces the live file with one `os.replace`, on failure it becomes `data/warehouse.failed-<timestamp>.duckdb` | one file | the live file is never written during a run; a leftover `.build` from an interrupted run is removed first; a leftover write-ahead log of the live file is removed on commit; the newest three failed copies are kept | `StagedWarehouse` | `src/project/adapters/staged_warehouse.py:52-84` |
+| Ingestion | `data/orders.csv` with a header row | `raw.orders`: `order_id INTEGER`, `customer_id INTEGER`, `amount DECIMAL(12, 2)`, `ordered_at TIMESTAMPTZ` | one row per CSV row; raw rows before deduplication, no key | table declared in `external_models.yaml` as `<schema>.<table>` of plain identifiers; no undeclared column ([ADR-0005](adr/ADR-0005-reject-undeclared-csv-columns.md)); declared columns present with their types; replaced, never appended, in one transaction, so a failed load keeps the previous rows; every failure is an `IngestionError` | `CsvSource` | `src/project/adapters/csv_source.py:29-63`, `src/project/adapters/csv_source.py:78-106`, `external_models.yaml:1-6` |
+| `RawSource` port | `duckdb.DuckDBPyConnection` | the raw table replaced; its row count as `int` | one call per raw table | `table_name` is read-only (`@property`); the table's schema matches `external_models.yaml`; a failure raises `IngestionError` | composition root | `src/project/ports.py:13-27` |
+| `Planner` port | `restate_models: Iterable[str] \| None`, `no_prompts`, `auto_apply` | the plan applied to prod, or `PlanError` | one plan per call | model tests run before planning; a failing audit raises `PlanError` and skips downstream models; `close()` releases the warehouse file | composition root (`sqlmesh.Context` satisfies it, [ADR-0003](adr/ADR-0003-planner-port.md)) | `src/project/ports.py:30-43`, `src/project/main.py:90-102` |
 | Staging | `raw.orders` | `orders.stg_orders` | one row per order, keyed by `order_id` (the version with the latest `ordered_at`) | every column cast; `not_null(order_id, customer_id, amount, ordered_at_utc)`; `unique_values(order_id)`; `assert_positive_amount` (rows with `amount <= 0` fail; a NULL `amount` fails `not_null`, finding 1, fixed); `assert_no_tied_versions` (two versions with the same `ordered_at` and a different customer or amount fail, finding 3, fixed) | `stg_orders` | `models/staging/stg_orders.sql:1-19`, `audits/assert_positive_amount.sql:1-5`, `audits/assert_no_tied_versions.sql:1-6` |
 | Mart | `orders.stg_orders` | `orders.fct_daily_revenue` | one row per UTC day, keyed by `order_date` | every column cast; `not_null(order_date, order_count, revenue)`; `unique_values(order_date)` | `fct_daily_revenue` | `models/marts/fct_daily_revenue.sql:1-16` |
 
@@ -172,16 +172,16 @@ files hold only a docstring), so the matrix applies. Rows import columns; `Y` is
 | main | | Y | Y | Y | Y |
 | ports | | | | | |
 | diagnostics | | | | | |
-| csv_source | | | | | |
+| csv_source | | Y | | | |
 | staged_warehouse | | | | | |
 
-No cycles. Direction: `main → adapters, diagnostics → ports`; `ports`, `diagnostics` and both adapters import no internal module
-(`CsvSource` satisfies `RawSource` structurally). The `main` row cites `src/project/main.py:13-16`. The import contract
+No cycles. Direction: `main → adapters, diagnostics → ports`; `ports`, `diagnostics` and `staged_warehouse` import no internal module; `csv_source` imports `ports` for
+`IngestionError` and satisfies `RawSource` structurally. The `main` row cites `src/project/main.py:13-16`, the `csv_source` row `src/project/adapters/csv_source.py:11`. The import contract
 (`pyproject.toml:186-195`, the `import-linter` hook at `.pre-commit-config.yaml:50-56`, which CI runs through
 `uv run pre-commit run --all-files`) fails the commit when an import points upward. Third-party imports (`duckdb`, `sqlmesh`,
 `ruamel.yaml`; `src/project/main.py:8-11`, `src/project/ports.py:6`, `src/project/diagnostics.py:5-8`,
 `src/project/adapters/csv_source.py:8-9`) are exactly the declared runtime dependencies (`pyproject.toml:10-14`), which deptry checks
-on every commit (`.pre-commit-config.yaml:43-49`).
+on every commit (`.pre-commit-config.yaml:43-49`), with `project` declared first-party (`pyproject.toml:197-200`).
 
 ## 8. Model lineage
 
@@ -206,15 +206,16 @@ model's `FROM` changes, in the same commit.
 │   └── assert_no_tied_versions.sql
 ├── src/project/
 │   ├── main.py                      # composition root: main(), run(), ingest(), transform()
-│   ├── ports.py                     # Protocols only: RawSource, Planner
+│   ├── ports.py                     # RawSource, Planner and IngestionError
 │   ├── diagnostics.py               # FailureLog: SQLMesh console that logs failed audits and model tests
-│   ├── adapters/csv_source.py       # CsvSource and IngestionError; the only SQL built in Python (identifier-only DDL)
-│   ├── adapters/staged_warehouse.py # StagedWarehouse: copy the warehouse, swap it in on success, keep it as the failed copy otherwise
+│   ├── adapters/csv_source.py       # CsvSource: the only SQL built in Python (identifier-only DDL)
+│   ├── adapters/staged_warehouse.py # StagedWarehouse: copy the warehouse, swap it in on success, keep a timestamped failed copy otherwise
 │   └── py.typed
 ├── tests/
 │   ├── test_models.yaml             # SQLMesh unit tests, one per model
 │   ├── test_adapters.py             # CsvSource against in-memory DuckDB
 │   ├── test_staged_warehouse.py     # StagedWarehouse against files in a temporary directory
+│   ├── test_model_tests.py          # every model has a unit test in test_models.yaml
 │   ├── test_diagnostics.py          # FailureLog with a failed model that is not an audit
 │   ├── test_main.py                 # run() with fake sources and a fake planner
 │   ├── test_pipeline.py             # end-to-end runs of main() on a copy of the project
@@ -223,7 +224,7 @@ model's `FROM` changes, in the same commit.
 │   ├── design.md                    # this file
 │   ├── lineage.html                 # generated: uv run sqlmesh dag docs/lineage.html
 │   └── adr/                         # decision records (section 10)
-├── data/                            # git-ignored: orders.csv (input), warehouse.duckdb, warehouse.failed.duckdb, .build/
+├── data/                            # git-ignored: orders.csv (input), warehouse.duckdb, warehouse.failed-*.duckdb, .build/
 └── tools/                           # vendored python-code-standards checks, not part of the pipeline
 ```
 
@@ -237,14 +238,14 @@ model's `FROM` changes, in the same commit.
 | [ADR-0004](adr/ADR-0004-csv-source-reads-its-contract.md) | `CsvSource(table_name, path, contract)` takes its table name and column types from `external_models.yaml` (D5) |
 | [ADR-0005](adr/ADR-0005-reject-undeclared-csv-columns.md) | `CsvSource` refuses CSV columns the contract does not declare (D8) |
 | [ADR-0006](adr/ADR-0006-run-in-the-project-directory.md) | `main()` runs with a working directory that decides the warehouse path, because SQLMesh resolves it against the working directory (D9) |
-| [ADR-0007](adr/ADR-0007-build-aside-and-swap.md) | each run builds on a copy of the warehouse, which replaces the live file only when the run succeeds; a failed copy is kept for inspection |
+| [ADR-0007](adr/ADR-0007-build-aside-and-swap.md) | each run builds on a copy of the warehouse, which replaces the live file only when the run succeeds; the newest three failed copies are kept for inspection |
 
 Decisions taken while building the skeleton that have no ADR:
 
 | record | what it covers |
 |---|---|
 | D6, [PR #2](https://github.com/CarlosSolrac/template-sqlmesh-duckdb/pull/2) | `main(project_dir=PROJECT_DIR) -> int` as the console script; no `__main__` block |
-| D10, PR #2 | sibling-relative imports inside `src/project`, because deptry does not see the package as first-party; it is also why `IngestionError` lives in `adapters/csv_source.py` and not in `ports.py` |
+| D10, PR #2 | sibling-relative imports inside `src/project`, because deptry does not see the package as first-party; `known_first_party = ["project"]` (`pyproject.toml:197-200`) now lets the adapter import `project.ports` |
 | D15, PR #2 | `docs/lineage.html` is generated and committed |
 
 Decisions taken in the follow-up commits, without an ADR because each is one reversible line or file:
@@ -254,7 +255,8 @@ Decisions taken in the follow-up commits, without an ADR because each is one rev
   restating `sqlmesh plan`, which wrote to the warehouse.
 - An import-linter contract enforces the direction of section 7, because five modules make the matrix apply (rule 6).
 - CI fails a change under `models/` that touches neither `tests/test_models.yaml` nor `tests/test_pipeline.py`
-  (`.github/workflows/ci.yml:57-64`).
+  (`.github/workflows/ci.yml:57-64`), and `tests/test_model_tests.py` fails when a model has no unit test.
+- Failed runs are kept as `warehouse.failed-<UTC timestamp>.duckdb`, newest three, so a rerun does not erase the evidence.
 
 ## 11. Non-functional requirements
 
@@ -262,18 +264,19 @@ Only requirements a check verifies.
 
 | ID | Requirement | Target | Verified by |
 |----|-------------|--------|-------------|
-| NFR-01 | Rows that fail an audit, staging or mart, never reach the live warehouse (including a NULL amount, finding 1, fixed, and tied versions, finding 3, fixed) | a failing audit makes the run exit 1 and names the audit in the log; the live `orders.stg_orders` and `orders.fct_daily_revenue` keep their last good rows; the rejected rows are in `warehouse.failed.duckdb` | `tests/test_pipeline.py:68-81`, `tests/test_pipeline.py:94-111`, `tests/test_pipeline.py:125-137` |
-| NFR-02 | Same-day reruns process new data | a new row on an already-computed day appears in the mart | `tests/test_pipeline.py:153-160` |
-| NFR-03 | A run from an empty warehouse completes | exit 0; mart equals the sample's daily totals | `tests/test_pipeline.py:59-65` |
-| NFR-04 | The run does not depend on the caller's working directory | a run started outside the project, or with a relative project path, uses the project's warehouse | `tests/test_pipeline.py:36`, `tests/test_pipeline.py:163-167` |
-| NFR-05 | Only declared raw tables and columns are loaded | `IngestionError` before any DDL; no schema created; exit 1 with the cause logged | `tests/test_adapters.py:58-112`, `tests/test_pipeline.py:114-122` |
-| NFR-06 | A failed reload keeps the previous raw table | previous rows after a missing file or a value of the wrong type | `tests/test_adapters.py:39-56` |
-| NFR-07 | Models produce the expected rows | `uv run sqlmesh test`: 2 tests pass, including a `+02` timestamp converted to UTC; SQLMesh also runs them before every plan, so each end-to-end test runs them in CI; a failing test is named in the log | `tests/test_models.yaml:1-27`, `tests/test_pipeline.py:30-31`, `tests/test_pipeline.py:84-91` |
+| NFR-01 | Rows that fail an audit, staging or mart, never reach the live warehouse (including a NULL amount, finding 1, fixed, and tied versions, finding 3, fixed) | a failing audit makes the run exit 1 and names the audit in the log; the live `orders.stg_orders` and `orders.fct_daily_revenue` keep their last good rows; the rejected rows are in the newest `warehouse.failed-*.duckdb` | `tests/test_pipeline.py:73-86`, `tests/test_pipeline.py:99-116`, `tests/test_pipeline.py:130-142` |
+| NFR-02 | Same-day reruns process new data | a new row on an already-computed day appears in the mart | `tests/test_pipeline.py:158-165` |
+| NFR-03 | A run from an empty warehouse completes | exit 0; mart equals the sample's daily totals | `tests/test_pipeline.py:64-70` |
+| NFR-04 | The run does not depend on the caller's working directory | a run started outside the project, or with a relative project path, uses the project's warehouse | `tests/test_pipeline.py:36`, `tests/test_pipeline.py:168-172` |
+| NFR-05 | Only declared raw tables and columns are loaded | `IngestionError` before any DDL; no schema created; exit 1 with the cause logged | `tests/test_adapters.py:58-112`, `tests/test_pipeline.py:119-127` |
+| NFR-06 | A failed reload keeps the previous raw table | previous rows after a missing file or a value of the wrong type | `tests/test_adapters.py:40-56` |
+| NFR-07 | Models produce the expected rows | `uv run sqlmesh test`: 2 tests pass, including a `+02` timestamp converted to UTC; SQLMesh also runs them before every plan, so each end-to-end test runs them in CI; a failing test is named in the log | `tests/test_models.yaml:1-27`, `tests/test_pipeline.py:30-31`, `tests/test_pipeline.py:89-96` |
 | NFR-08 | Tests cover the code | 100% of statements and branches, whole project and changed lines | `pyproject.toml:175-182`, `.github/workflows/ci.yml:40-49` |
 | NFR-09 | Strict static typing | pyright and mypy, both strict, pass | `.pre-commit-config.yaml:18-31`, `.github/workflows/ci.yml:34-35` |
 | NFR-10 | No dependency with a known vulnerability | `pip-audit` passes | `.github/workflows/ci.yml:65-66` |
-| NFR-11 | A failed or interrupted run leaves the live warehouse unchanged, and a later success removes the failed copy | live rows equal the last good rows after a failure; no `.build` or `warehouse.failed.duckdb` after a success | `tests/test_staged_warehouse.py:26-116`, `tests/test_pipeline.py:140-150` |
+| NFR-11 | A failed or interrupted run leaves the live warehouse unchanged, and a later success leaves the failed copies alone | live rows equal the last good rows after a failure; no `.build` after a success, and the newest three failed copies survive it | `tests/test_staged_warehouse.py:29-133`, `tests/test_pipeline.py:145-155` |
 | NFR-12 | Imports point inward | `uv run lint-imports` passes | `pyproject.toml:186-195`, `.pre-commit-config.yaml:50-56` |
+| NFR-13 | Every model has a unit test | `tests/test_model_tests.py` finds no model without a test in `tests/test_models.yaml` | `tests/test_model_tests.py:12-39` |
 
 ## 12. Findings
 
@@ -288,33 +291,34 @@ Only requirements a check verifies.
    only order had no amount left `(2026-10-03, 1, NULL)` in the mart). Fix: every run builds on a copy of the warehouse that replaces
    the live file only on success (`src/project/main.py:35-46`, [ADR-0007](adr/ADR-0007-build-aside-and-swap.md)). The case that remained
    after the NULL fix, a mart audit failing because of a model bug, is tested with an audit that fails on the data
-   (`tests/test_pipeline.py:125-137`). Cost: each run copies the whole warehouse file (section 1, open question 1).
+   (`tests/test_pipeline.py:130-142`). Cost: each run copies the whole warehouse file (section 1, open question 1).
 3. **Rule 5, tied versions deduplicated arbitrarily (known; fixed).** `models/staging/stg_orders.sql:19` orders versions by
    `ordered_at` only, so two versions of an order with the same `ordered_at` and different amounts kept whichever row came first, and
    revenue depended on input row order. Fix: `assert_no_tied_versions` (`audits/assert_no_tied_versions.sql:1-6`, attached at
-   `models/staging/stg_orders.sql:9`) fails the run on such a tie; tested at `tests/test_pipeline.py:104-111`. The same audit belongs in
+   `models/staging/stg_orders.sql:9`) fails the run on such a tie; tested at `tests/test_pipeline.py:109-116`. The same audit belongs in
    design-spec's draft.
 4. **Rule 5, ingestion failures were not caught once per unit of work (new; fixed).** `CsvSource.load` now turns every `ValueError`
-   and `duckdb.Error` into an `IngestionError` (`src/project/adapters/csv_source.py:41-45`), which `run()` logs before returning 1
-   (`src/project/main.py:67-69`); tested at `tests/test_main.py:111-121` and `tests/test_pipeline.py:114-122`. An exception of any other
-   type still propagates (`tests/test_main.py:124-132`), as a bug should.
+   and `duckdb.Error` into an `IngestionError` (`src/project/adapters/csv_source.py:39-43`), which `run()` logs before returning 1
+   (`src/project/main.py:67-69`); tested at `tests/test_main.py:110-120` and `tests/test_pipeline.py:119-127`. An exception of any other
+   type still propagates (`tests/test_main.py:123-132`), as a bug should.
 5. **Rule 12, decisions without records (new; fixed).** D4, D5, D8 and D9 are now
    [ADR-0003](adr/ADR-0003-planner-port.md) to [ADR-0006](adr/ADR-0006-run-in-the-project-directory.md).
 6. **Rule 11, a model change does not require a test change (new; fixed).** The staging test now includes a `+02` timestamp, so
    the UTC conversion (`models/staging/stg_orders.sql:17`) is exercised with another offset (`tests/test_models.yaml:8`,
-   `tests/test_models.yaml:13`), and CI fails a change under `models/` that touches neither `tests/test_models.yaml` nor
-   `tests/test_pipeline.py` (`.github/workflows/ci.yml:57-64`). The check compares paths, not content: a test file touched
-   for another reason satisfies it.
-7. **Rule 5, the failing rows are only in the failed copy (new).** After a failed run, the rows an audit rejected exist only in
-   `data/warehouse.failed.duckdb`, which the next failed run replaces and the next success removes (`src/project/adapters/staged_warehouse.py:57-69`).
-   Consequence: an operator who does not look before rerunning loses them. Fix, if wanted: keep a timestamped copy per failure, with a
-   retention rule.
+   `tests/test_models.yaml:13`). CI fails a change under `models/` that touches neither `tests/test_models.yaml` nor
+   `tests/test_pipeline.py` (`.github/workflows/ci.yml:57-64`), and `tests/test_model_tests.py:12-39` fails when a model has no unit
+   test at all. Neither check can tell whether a changed model's test still says something true; mutation testing would
+   (`tools/mutation.sh`).
+7. **Rule 5, the rows a failed run rejected are kept only for three failures (new; fixed).** The copy of a failed run is kept as
+   `data/warehouse.failed-<UTC timestamp>.duckdb` and the newest three are kept (`src/project/adapters/staged_warehouse.py:72-84`); a
+   successful run leaves them alone. Consequence: the fourth failure erases the oldest evidence, and the copies cost up to three
+   times the warehouse size in disk. Fix, if wanted: a different retention.
 
 Allowed exceptions and rules that do not apply:
 
-- Rule 8: `CsvSource` interpolates identifiers into DDL (`src/project/adapters/csv_source.py:58-59`) only after checking the name
-  against `external_models.yaml` and the `<schema>.<table>` pattern (`src/project/adapters/csv_source.py:13`,
-  `src/project/adapters/csv_source.py:49-50`); tested at `tests/test_adapters.py:73-112`.
+- Rule 8: `CsvSource` interpolates identifiers into DDL (`src/project/adapters/csv_source.py:56-57`) only after checking the name
+  against `external_models.yaml` and the `<schema>.<table>` pattern (`src/project/adapters/csv_source.py:15`,
+  `src/project/adapters/csv_source.py:47-48`); tested at `tests/test_adapters.py:73-112`.
 - Rule 3: `main()` sets the console (`src/project/main.py:34`), the working directory for the run (`src/project/main.py:38`) and calls
   `StagedWarehouse` (`src/project/main.py:35-46`); all of it is wiring, and the file copying and swapping is in the adapter.
 - Rule 7: no Python models.
@@ -326,8 +330,8 @@ Not applicable: no Python contract is under review; the two Protocols are in sec
 
 ## 14. Error flow
 
-The failure paths are the template's main promise (NFR-01, NFR-05, NFR-06, NFR-11), so they are drawn. `tests/test_main.py:78-132`
-drives the same paths with fake sources and a fake planner; `tests/test_pipeline.py:59-167` drives them end to end.
+The failure paths are the template's main promise (NFR-01, NFR-05, NFR-06, NFR-11), so they are drawn. `tests/test_main.py:77-132`
+drives the same paths with fake sources and a fake planner; `tests/test_pipeline.py:64-172` drives them end to end.
 
 ```mermaid
 sequenceDiagram
@@ -366,7 +370,7 @@ sequenceDiagram
     alt status 0
         Main->>Stage: commit(): the copy replaces the live warehouse
     else status 1
-        Main->>Stage: discard(): the live warehouse is unchanged, the copy becomes warehouse.failed.duckdb
+        Main->>Stage: discard(): the live warehouse is unchanged, the copy becomes a timestamped warehouse.failed file
     end
 ```
 
@@ -379,6 +383,6 @@ Not applicable: document mode describes the code as it is; the change-impact dia
 1. What are the production row volume, growth rate and refresh frequency? They decide between `FULL` models with replaced raw tables
    (ADR-0002) and incremental ones, and whether copying the whole warehouse on every run (ADR-0007) stays affordable.
 2. Who reads the warehouse, and can they be held to marts only? Rejected rows no longer reach the live warehouse, so this matters
-   less, but `data/warehouse.failed.duckdb` holds them and nothing in the repository restricts access to it.
+   less, but the `data/warehouse.failed-*.duckdb` copies hold them and nothing in the repository restricts access to it.
 3. Which design-spec draft sections receive the fixes made here? Decided on 2026-10-22: all of them are ported to design-spec's
    draft §10, in a separate pull request in python-code-standards.
