@@ -171,18 +171,18 @@ class ScopeChecker(ast.NodeVisitor):
             if not (self.in_enum_body and _is_member_target(target)):
                 self._bind(target)
 
-    def visit_For(self, node: ast.For) -> None:
+    def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
         """Check the loop target, then the body."""
         self.visit(node.iter)
         self._bind(node.target)
         self.visit_body(node.body)
         self.visit_body(node.orelse)
 
-    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:  # passthrough: allow -- NodeVisitor dispatches by name
         """Async loops behave identically."""
-        self.visit_For(node)  # type: ignore[arg-type]
+        self.visit_For(node)
 
-    def visit_With(self, node: ast.With) -> None:
+    def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
         """Check each ``as`` target, then the body."""
         item: ast.withitem
         for item in node.items:
@@ -191,9 +191,9 @@ class ScopeChecker(ast.NodeVisitor):
                 self._bind(item.optional_vars)
         self.visit_body(node.body)
 
-    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:  # passthrough: allow -- NodeVisitor dispatches by name
         """Async context managers behave identically."""
-        self.visit_With(node)  # type: ignore[arg-type]
+        self.visit_With(node)
 
     def _bind_pattern(self, node: ast.pattern) -> None:
         """Record every name a structural pattern binds.
@@ -329,7 +329,7 @@ class ScopeChecker(ast.NodeVisitor):
         self.declared.add(node.name)
         self._enter_function(node)
 
-    def visit_Lambda(self, node: ast.Lambda) -> None:
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # passthrough: allow -- NodeVisitor dispatches by name
         """Lambdas open a scope with no statements to check."""
         self._enter_function(node)
 
