@@ -190,8 +190,8 @@ show_missing = true
 root_packages = ["project"]
 
 # Same direction as the component flowchart in docs/design.md: the composition root may import everything below it; the adapters and
-# the diagnostics console are independent of each other; nothing imports upward. `CsvSource` satisfies `RawSource` structurally, so
-# the adapters do not import the ports.
+# the diagnostics console are independent of each other; nothing imports upward. The adapters import only `IngestionError` from the
+# ports; `CsvSource` satisfies `RawSource` structurally.
 [[tool.importlinter.contracts]]
 name = "Dependencies point inward"
 type = "layers"

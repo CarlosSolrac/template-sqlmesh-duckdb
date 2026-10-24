@@ -40,24 +40,28 @@ everything downstream of the raw table, so a same-day rerun picks up new rows
 A run builds on a copy of the warehouse and swaps it in only when it succeeds
 ([ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md)), so `data/warehouse.duckdb` never holds rows an audit rejected, and a failed
 run leaves it unchanged. The copy of the failed run is kept as `data/warehouse.failed-<timestamp>.duckdb` (the newest three are kept); open one
-with DuckDB to see the rejected rows. A run works from any directory ([ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md)) and creates `data/` if missing.
+with DuckDB to see the rejected rows. A run works from any directory and creates `data/` if missing.
 `data/` (input, warehouse, the failed copies and the in-progress `data/.build`) is git-ignored.
 
 When a run exits 1, its output names the audit that failed (with the model it belongs to) or the model test that failed, or the
 ingestion error. To run the model tests alone, on their own fixture rows, use `uv run sqlmesh test` from the repository root. What each
-failure leaves behind is in the [error flow](docs/design.md#14-error-flow) and [findings](docs/design.md#12-findings).
+failure leaves behind is in the [error flow](docs/design.md#14-error-flow) and [ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md).
 
 ## Checks
 
 ```sh
-uv run pre-commit run --all-files    # Ruff, declarations, pyright and mypy (strict), suppressions, complexity, deptry, gitleaks
+uv run pre-commit run --all-files    # Ruff, declarations, pyright and mypy (strict), suppressions, complexity, deptry, import-linter, gitleaks
 uv run pytest --cov --cov-branch     # unit and end-to-end tests; 100% statement and branch coverage required
 uv run sqlmesh test                  # SQLMesh model tests (tests/test_models.yaml)
+wsl -e bash -lc "bash tools/mutation.sh"   # mutation testing (mutmut needs os.fork: Linux, macOS, or WSL on Windows); report-only
 ```
 
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs these first two, plus diff coverage, the suppression check against the
-base branch, and `pip-audit`. After changing a model's `FROM`, regenerate the lineage view with
-`uv run sqlmesh dag docs/lineage.html` and commit it with the change.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the first two, then fails a change that adds a module with no coverage
+record, leaves a changed line uncovered (diff coverage), adds a suppression `suppressions.toml` does not approve (against the base
+branch), or changes `models/` without touching `tests/test_models.yaml` or `tests/test_pipeline.py`; last, `pip-audit`. Mutation testing
+runs nightly and on demand ([`.github/workflows/mutation.yml`](.github/workflows/mutation.yml)); it never fails, and its surviving
+mutants are uploaded as the `mutation-report` artifact and tracked in [TODO.md](TODO.md). After changing a model's `FROM`, regenerate
+the lineage view with `uv run sqlmesh dag docs/lineage.html` and commit it with the change.
 
 ## Documentation
 
@@ -65,12 +69,14 @@ base branch, and `pip-audit`. After changing a model's `FROM`, regenerate the li
   [size](docs/design.md#1-size-and-numbers), [context view](docs/design.md#2-context-view),
   [components](docs/design.md#5-components), [boundary contracts](docs/design.md#6-boundary-contracts),
   [directory tree](docs/design.md#9-directory-tree), [decisions](docs/design.md#10-decisions),
-  [non-functional requirements](docs/design.md#11-non-functional-requirements), [findings](docs/design.md#12-findings),
-  [error flow](docs/design.md#14-error-flow) and [open questions](docs/design.md#open-questions).
+  [non-functional requirements](docs/design.md#11-non-functional-requirements), [findings](docs/design.md#12-findings) and
+  [error flow](docs/design.md#14-error-flow).
+- [TODO.md](TODO.md): the open items, from production volumes to surviving mutants.
 - [docs/adr/](docs/adr/): [ADR-0001](docs/adr/ADR-0001-sqlmesh-with-exit-path.md), SQLMesh with an exit path;
   [ADR-0002](docs/adr/ADR-0002-replace-and-restate.md), replace raw tables and restate downstream on every run;
-  [ADR-0003](docs/adr/ADR-0003-planner-port.md) to [ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md), the `Planner` port,
-  the contract-typed `CsvSource`, rejecting undeclared CSV columns, and running in the project directory;
-  [ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md), build each run on a copy of the warehouse and swap it in on success.
+  [ADR-0003](docs/adr/ADR-0003-planner-port.md) to [ADR-0005](docs/adr/ADR-0005-reject-undeclared-csv-columns.md), the `Planner`
+  port, the contract-typed `CsvSource`, and rejecting undeclared CSV columns;
+  [ADR-0006](docs/adr/ADR-0006-run-in-the-project-directory.md), running in the project directory, superseded by ADR-0007;
+  [ADR-0007](docs/adr/ADR-0007-build-aside-and-swap.md), build each run on a copy of the warehouse, in its directory, and swap it in on success.
 - [docs/lineage.html](docs/lineage.html): SQLMesh's model lineage, generated (it loads its graph library from unpkg, so it needs
   network to view).

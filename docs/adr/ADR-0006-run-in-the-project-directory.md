@@ -1,5 +1,5 @@
 ### ADR-0006: Run the pipeline with the project directory as the working directory
-- Status: Accepted
+- Status: Superseded by [ADR-0007](ADR-0007-build-aside-and-swap.md) (2026-10-24), which carries the parts still in force
 - Date: 2026-10-18
 - Context: SQLMesh resolves `config.yaml`'s relative `database: data/warehouse.duckdb` against the process working directory, not against `Context(paths=...)`. The draft's `main.py` computed the warehouse path from `__file__`, so a run started outside the repository root ingested into one `warehouse.duckdb` while SQLMesh opened another.
 - Decision: `main(project_dir=PROJECT_DIR)` runs the whole pipeline inside `contextlib.chdir(project_dir)`, after resolving `project_dir` to an absolute path. `config.yaml` stays the only place that names the database.
