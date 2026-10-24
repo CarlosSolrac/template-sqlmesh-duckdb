@@ -9,8 +9,9 @@
 # Run it through bash: setup writes it without the executable bit, and commits
 # made on Windows never record one.
 #   bash tools/mutation.sh
-# mutmut needs os.fork, so it runs on Linux and macOS. On Windows, run it in WSL:
-#   wsl -e bash tools/mutation.sh
+# mutmut needs os.fork, so it runs on Linux and macOS. On Windows, run it in WSL,
+# through a login shell, which puts uv's ~/.local/bin on PATH:
+#   wsl -e bash -lc "bash tools/mutation.sh"
 # Pass a mutant name pattern to narrow a local run:
 #   bash tools/mutation.sh 'mypackage.module*'
 #

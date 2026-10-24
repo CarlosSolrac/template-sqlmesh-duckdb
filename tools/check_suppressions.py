@@ -4,9 +4,9 @@ Suppressing a lint, type, or coverage finding needs the user's explicit
 authorization. This makes that rule mechanical: a ``noqa``, ``type: ignore``,
 ``pyright: ignore``, ``pragma: no cover``, or ``pragma: no branch`` comment on an
 added line fails, as does a file- or function-level one (``ruff: noqa``,
-``flake8: noqa``, ``mypy:`` and ``pyright:`` settings, ``complexipy: ignore``),
-unless ``suppressions.toml`` lists its file and code (for a setting, its whole
-value):
+``flake8: noqa``, ``mypy:`` and ``pyright:`` settings, ``complexipy: ignore``,
+``passthrough: allow``), unless ``suppressions.toml`` lists its file and code
+(for a setting, its whole value):
 
     [[suppression]]
     path = "tools/hooks/stop_gate.py"
@@ -43,10 +43,12 @@ from .hooks.stop_gate import PYTHON_SUFFIXES, GitError, Runner, run_command
 ALLOW_LIST: Path = Path("suppressions.toml")
 REQUIRED_KEYS: tuple[str, ...] = ("path", "code", "reason")
 # Line-level directives, then the file- and function-level ones (ruff and flake8
-# file noqa, mypy and pyright file comments, complexipy's ignore), which silence
-# more than a line. coverage.py honors "no cover" and "no branch" pragmas, and
-# mutmut skips lines marked "no mutate".
-DIRECTIVE: re.Pattern[str] = re.compile(r"#\s*(ruff:\s*noqa|flake8:\s*noqa|noqa|type:\s*ignore|pyright:\s*ignore|pyright:|mypy:|complexipy:\s*ignore|pragma:?\s*no\s*(?:cover|branch|mutate))", re.IGNORECASE)
+# file noqa, mypy and pyright file comments, complexipy's ignore, check_passthrough's
+# allow), which silence more than a line. coverage.py honors "no cover" and "no
+# branch" pragmas, and mutmut skips lines marked "no mutate".
+DIRECTIVE: re.Pattern[str] = re.compile(
+    r"#\s*(ruff:\s*noqa|flake8:\s*noqa|noqa|type:\s*ignore|pyright:\s*ignore|pyright:|mypy:|complexipy:\s*ignore|passthrough:\s*allow|pragma:?\s*no\s*(?:cover|branch|mutate))", re.IGNORECASE
+)
 # Ruff separates noqa codes with commas, spaces, or both; every code is captured.
 NOQA_CODES: re.Pattern[str] = re.compile(r":\s*([A-Z]+[0-9]+(?:[\s,]+[A-Z]+[0-9]+)*)")
 CODE: re.Pattern[str] = re.compile(r"[A-Z]+[0-9]+")
@@ -61,6 +63,7 @@ CANONICAL: dict[str, str] = {
     "pyright": "pyright:",
     "mypy": "mypy:",
     "complexipyignore": "complexipy: ignore",
+    "passthroughallow": "passthrough: allow",
     "pragmanocover": "pragma: no cover",
     "pragmanobranch": "pragma: no branch",
     "pragmanomutate": "pragma: no mutate",
@@ -80,7 +83,7 @@ class Suppression:
         """Return the suppression as it reads in source."""
         if self.kind in NOQA_KINDS:
             return f"{self.kind}: {self.code}" if self.code else f"{self.kind} ({'blanket' if self.kind == 'noqa' else 'whole file'})"
-        if self.kind in {"pragma", "complexipy", "mypy", "pyright"}:
+        if self.kind in {"pragma", "complexipy", "passthrough", "mypy", "pyright"}:
             return f"{self.kind}: {self.code}"
         return f"{self.kind}[{self.code}]" if self.code else self.kind
 
@@ -126,6 +129,8 @@ def parse_directive(word: str, tail: str) -> list[Suppression]:
         return [Suppression(word.removesuffix(":"), " ".join(tail.split()))]
     if word == "complexipy: ignore":
         return [Suppression("complexipy", "ignore")]
+    if word == "passthrough: allow":
+        return [Suppression("passthrough", "allow")]
     return [Suppression("pragma", word.removeprefix("pragma: "))]
 
 
