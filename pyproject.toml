@@ -163,9 +163,12 @@ pythonpath = ["."]
 
 [tool.mutmut]
 # Mutation testing (tools/mutation.sh): a surviving mutant is a code change no
-# test noticed. Required before the first run: list the code to mutate, e.g.
-#   source_paths = ["mypackage"]
-# mutmut's own guess uses the checkout folder's name, which breaks in clones and CI.
+# test noticed. The code to mutate is listed explicitly, because mutmut's own guess
+# uses the checkout folder's name, which breaks in clones and CI. mutmut copies only
+# tests/, pyproject.toml and uv.lock into mutants/; the end-to-end tests also need
+# the SQLMesh project files.
+source_paths = ["src/project"]
+also_copy = ["config.yaml", "external_models.yaml", "models", "audits"]
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = ["-m", "not no_mutation"]
 
