@@ -10,10 +10,5 @@ reason = "subprocess argv comes from the hook's fixed gate list, never a shell"
 
 [[suppression]]
 path = "tools/check_declarations.py"
-code = "arg-type"
-reason = "the async visitors reuse the sync ones; async nodes carry the same fields"
-
-[[suppression]]
-path = "tools/check_declarations.py"
 code = "allow"
 reason = "NodeVisitor dispatches by method name, so the async and lambda visitors must exist"
